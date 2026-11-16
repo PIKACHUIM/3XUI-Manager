@@ -13,8 +13,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "3xui-manager",
-      "database_id": "6de4d6a8-512d-46cd-88e0-85fcec1da37d",
+      "database_name": "3xuiwork-data",
+      "database_id": "4bd75483-b2ce-4e6e-8020-0efa72ff6b9d",
       "migrations_dir": "migrations"
     }
   ],

@@ -10,8 +10,8 @@
     "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types",
     "typecheck": "tsc --noEmit",
-    "db:local": "wrangler d1 migrations apply 3xui-manager --local",
-    "db:remote": "wrangler d1 migrations apply 3xui-manager --remote",
+    "db:local": "wrangler d1 migrations apply 3xuiwork-data --local",
+    "db:remote": "wrangler d1 migrations apply 3xuiwork-data --remote",
     "test": "vitest run",
     "test:watch": "vitest"
   },

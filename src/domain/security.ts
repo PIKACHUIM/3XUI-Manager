@@ -35,19 +35,23 @@ export async function verifySecret(provided: string, expected: string): Promise<
   return diff === 0;
 }
 
+/** Workers WebCrypto rejects PBKDF2 iteration counts above 100000, so stay at that ceiling. */
+const PBKDF2_ROUNDS = 100_000;
+const PBKDF2_MIN_ROUNDS = 10_000;
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = new Uint8Array(16);
   crypto.getRandomValues(salt);
   const material = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 210_000, hash: "SHA-256" }, material, 256);
-  return `pbkdf2-sha256$210000$${bytesToBase64Url(salt)}$${bytesToBase64Url(new Uint8Array(bits))}`;
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: PBKDF2_ROUNDS, hash: "SHA-256" }, material, 256);
+  return `pbkdf2-sha256$${PBKDF2_ROUNDS}$${bytesToBase64Url(salt)}$${bytesToBase64Url(new Uint8Array(bits))}`;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [scheme, roundsText, saltText, digestText] = stored.split("$");
   if (scheme !== "pbkdf2-sha256" || !roundsText || !saltText || !digestText) return false;
   const rounds = Number(roundsText);
-  if (!Number.isInteger(rounds) || rounds < 100_000 || rounds > 500_000) return false;
+  if (!Number.isInteger(rounds) || rounds < PBKDF2_MIN_ROUNDS || rounds > PBKDF2_ROUNDS) return false;
   const salt = base64UrlToBytes(saltText);
   const material = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: Uint8Array.from(salt).buffer as ArrayBuffer, iterations: rounds, hash: "SHA-256" }, material, 256);
