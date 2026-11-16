@@ -814,7 +814,7 @@ function DashboardApp({ sessionUser, publicConfig, onLogout }: { sessionUser: Au
           {page === "subscription" && <SubscriptionPage t={t} locale={locale} subscription={subscription} onCopy={copyLink} />}
           {page === "account" && <AccountPage t={t} locale={locale} user={sessionUser} overview={overview} rows={orderDisplayRows} onNavigate={setPage} />}
           {page === "checkin" && <CheckinPage t={t} locale={locale} attendance={overview?.attendance ?? null} available={Boolean(overview?.capabilities.trafficMetering)} securityConfigAvailable={publicConfig !== null} turnstileRequired={Boolean(publicConfig?.checkinTurnstileEnabled)} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} busy={checkinBusy} onCheckin={(token) => { void submitCheckin(token); }} />}
-          {page === "system" && <SystemPage t={t} locale={locale} onAction={(label) => flash(label)} />}
+          {page === "system" && <SystemPage t={t} locale={locale} publicConfig={publicConfig} theme={theme} accent={accent} onTheme={chooseTheme} onAccent={setAccent} onLocale={changeLocale} onAction={(label) => flash(label)} />}
           <footer className="page-footer"><span>© 2025 3XUI Manager</span><span><i /> {t("apiStatus")} <b>·</b> {admin ? t("d1Mode") : t("planName")}</span></footer>
         </section>
       </main>
@@ -1351,8 +1351,189 @@ function CheckinPage({ t, locale, attendance, available, securityConfigAvailable
 })}</p><div className="setting-row"><div><b>{say(locale, "今日状态", "Today's status")}</b><small>{attendance?.lastCheckinAt ? formatDate(attendance.lastCheckinAt, locale) : say(locale, "暂无签到记录", "No check-ins recorded")}</small></div><span className={`status-chip ${checkedIn ? "" : "pending"}`}><i />{checkedIn ? say(locale, "已完成", "Complete") : say(locale, "未签到", "Not checked in")}</span></div><div className="setting-row"><div><b>{say(locale, "本次奖励", "Today's reward")}</b><small>{say(locale, "增加流量额度", "Added to traffic quota")}</small></div><strong>{formatBytes(attendance?.rewardBytes ?? 0)}</strong></div></section></div>;
 }
 
-function SystemPage({ t, locale, onAction }: { t: TextFn; locale: Locale; onAction: (label: string) => void }) {
-  return <div className="settings-layout"><aside className="panel settings-menu">{[["settingsTitle", Settings2], ["security", ShieldCheck], ["referrals", Users], ["attendance", Zap], ["emails", Bell], ["display", Palette]].map(([label, Icon]) => { const MenuIcon = Icon as LucideIcon; return <button key={label as string} className={label === "settingsTitle" ? "active" : ""}><MenuIcon size={16} />{t(label as MessageKey)}<ChevronRight size={14} /></button>; })}</aside><section className="panel settings-content"><div className="settings-section"><div className="section-kicker">{say(locale, "常规", "GENERAL")}</div><h3>{t("settingsTitle")}</h3><p>{t("display")}</p><div className="setting-row"><div><b>{t("storageMode")}</b><small>{t("d1Mode")} · available</small></div><span className="status-chip"><i />{t("active")}</span></div><div className="setting-row"><div><b>{t("realtimeSync")}</b><small>3X-UI API · HMAC checks</small></div><span className="status-chip"><i />{t("enabled")}</span></div><div className="setting-row"><div><b>{t("trafficSync")}</b><small>{t("syncStatus")} · {t("statusGood")}</small></div><span className="status-chip"><i />{t("enabled")}</span></div><div className="setting-row"><div><b>{t("emails")}</b><small>{t("notifications")} · default off</small></div><button className="toggle" aria-label={t("emails")} onClick={() => onAction(t("saveSuccess"))}><i /></button></div></div><div className="settings-actions"><span>{t("mockNotice")}</span><button className="primary-button" onClick={() => onAction(t("saveSuccess"))}>{t("save")}</button></div></section></div>;
+type SettingsTabKey = "platform" | "security" | "referrals" | "attendance" | "emails" | "display";
+
+const settingsTabs: Array<[SettingsTabKey, MessageKey, LucideIcon]> = [
+  ["platform", "settingsTitle", Settings2],
+  ["security", "security", ShieldCheck],
+  ["referrals", "referrals", Users],
+  ["attendance", "attendance", Zap],
+  ["emails", "emails", Bell],
+  ["display", "display", Palette],
+];
+
+/** Maps the stored settings document onto the editable form values. */
+function settingsDraft(settings: Record<string, unknown>): Record<string, string | boolean> {
+  const flag = (key: string, fallback: boolean) => (typeof settings[key] === "boolean" ? settings[key] as boolean : fallback);
+  const number = (key: string, fallback: number) => {
+    const raw = settings[key];
+    return String(typeof raw === "number" && Number.isFinite(raw) ? raw : fallback);
+  };
+  const balance = typeof settings.defaultBalanceMinor === "number" && Number.isFinite(settings.defaultBalanceMinor) ? settings.defaultBalanceMinor : 0;
+  const reward = typeof settings.checkinTrafficBytes === "number" && Number.isFinite(settings.checkinTrafficBytes) ? settings.checkinTrafficBytes : 0;
+  return {
+    registrationEnabled: flag("registrationEnabled", true),
+    inviteRequired: flag("inviteRequired", false),
+    emailVerificationRequired: flag("emailVerificationRequired", true),
+    defaultBalance: (balance / 100).toFixed(2),
+    timezone: typeof settings.timezone === "string" && settings.timezone ? settings.timezone : "UTC",
+    turnstileEnabled: flag("turnstileEnabled", false),
+    turnstileOnCheckin: flag("turnstileOnCheckin", false),
+    userInvitesEnabled: flag("userInvitesEnabled", false),
+    userInviteLimit: number("userInviteLimit", 0),
+    referralPercent: number("referralPercent", 0),
+    referralValidityDays: number("referralValidityDays", 30),
+    checkinRewardGb: String(Number((reward / 1_000_000_000).toFixed(3))),
+    notifyTrafficExhausted: flag("notifyTrafficExhausted", true),
+    notifySubscriptionExpired: flag("notifySubscriptionExpired", true),
+    notifyTrafficReset: flag("notifyTrafficReset", false),
+    notifyOrderExpired: flag("notifyOrderExpired", false),
+    notifyReferralReward: flag("notifyReferralReward", false),
+    notifyAccountCleanup: flag("notifyAccountCleanup", false),
+  };
+}
+
+/** One-line description of each settings tab. */
+function settingsTabHint(tab: SettingsTabKey, locale: Locale): string {
+  if (tab === "platform") return say(locale, "注册、初始余额与时区。", "Registration, starting balance and time zone.");
+  if (tab === "security") return say(locale, "人机验证与登录安全策略。", "Human verification and login security.");
+  if (tab === "referrals") return say(locale, "邀请码与返利比例。", "Invite codes and referral commission.");
+  if (tab === "attendance") return say(locale, "每日签到奖励的流量额度。", "Traffic granted by the daily check-in.");
+  if (tab === "emails") return say(locale, "哪些事件会发送邮件通知。", "Which events send email notifications.");
+  return say(locale, "主题、强调色与界面语言。", "Theme, accent color and interface language.");
+}
+
+function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent, onLocale, onAction }: {
+  t: TextFn; locale: Locale; publicConfig: PublicConfig | null; theme: Theme; accent: string;
+  onTheme: (next: Theme) => void; onAccent: (next: string) => void; onLocale: (next: Locale) => void;
+  onAction: (label: string) => void;
+}) {
+  const [tab, setTab] = useState<SettingsTabKey>("platform");
+  const [draft, setDraft] = useState<Record<string, string | boolean> | null>(null);
+  const [health, setHealth] = useState<{ capabilities?: { trafficMetering?: boolean } } | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void apiRequest<{ settings: Record<string, unknown> }>("/api/admin/settings")
+      .then((result) => { if (active) setDraft(settingsDraft(result.settings)); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Failed to load settings."); });
+    void apiRequest<{ capabilities?: { trafficMetering?: boolean } }>("/api/health")
+      .then((result) => { if (active) setHealth(result); })
+      .catch(() => { if (active) setHealth(null); });
+    return () => { active = false; };
+  }, []);
+  const setValue = (key: string, value: string | boolean) => setDraft((current) => (current ? { ...current, [key]: value } : current));
+  const isOn = (key: string) => draft?.[key] === true;
+  const wholeNumber = (key: string, min: number, max: number): number => {
+    const parsed = Number(String(draft?.[key] ?? "").trim());
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new Error(say(locale, "请填写有效范围内的整数。", "Enter a whole number within the allowed range."));
+    return parsed;
+  };
+  const decimalNumber = (key: string, min: number, max: number): number => {
+    const parsed = Number(String(draft?.[key] ?? "").trim());
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max) throw new Error(say(locale, "请填写有效范围内的数值。", "Enter a number within the allowed range."));
+    return parsed;
+  };
+  const save = async () => {
+    if (!draft || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const payload: Record<string, unknown> = {};
+      if (tab === "platform") {
+        const balance = parseMoneyInput(String(draft.defaultBalance ?? ""), "USD");
+        if (balance === null) throw new Error(say(locale, "初始余额格式不正确。", "The starting balance is not a valid amount."));
+        const timezone = String(draft.timezone ?? "").trim();
+        if (!timezone) throw new Error(say(locale, "请填写时区名称。", "Enter a time zone name."));
+        Object.assign(payload, { registrationEnabled: isOn("registrationEnabled"), inviteRequired: isOn("inviteRequired"), emailVerificationRequired: isOn("emailVerificationRequired"), defaultBalanceMinor: balance, timezone });
+      } else if (tab === "security") {
+        Object.assign(payload, { turnstileEnabled: isOn("turnstileEnabled"), turnstileOnCheckin: isOn("turnstileOnCheckin") });
+      } else if (tab === "referrals") {
+        Object.assign(payload, {
+          userInvitesEnabled: isOn("userInvitesEnabled"), userInviteLimit: wholeNumber("userInviteLimit", 0, 1000),
+          referralPercent: decimalNumber("referralPercent", 0, 100), referralValidityDays: wholeNumber("referralValidityDays", 0, 3650),
+        });
+      } else if (tab === "attendance") {
+        Object.assign(payload, { checkinTrafficBytes: Math.round(decimalNumber("checkinRewardGb", 0, 1000) * 1_000_000_000) });
+      } else if (tab === "emails") {
+        for (const key of ["notifyTrafficExhausted", "notifySubscriptionExpired", "notifyTrafficReset", "notifyOrderExpired", "notifyReferralReward", "notifyAccountCleanup"]) payload[key] = isOn(key);
+      }
+      if (Object.keys(payload).length) {
+        await apiRequest("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      }
+      const result = await apiRequest<{ settings: Record<string, unknown> }>("/api/admin/settings");
+      setDraft(settingsDraft(result.settings));
+      onAction(t("saveSuccess"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : say(locale, "保存失败。", "Saving failed."));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const row = (key: string, title: string, hint: string, control: React.ReactNode) => (
+    <div className="setting-row" key={key}><div><b>{title}</b><small>{hint}</small></div>{control}</div>
+  );
+  const toggleRow = (key: string, title: string, hint: string) => row(key, title, hint,
+    <button type="button" role="switch" aria-checked={isOn(key)} aria-label={title} className={`toggle ${isOn(key) ? "on" : "off"}`} disabled={!draft || saving} onClick={() => setValue(key, !isOn(key))}><i /></button>);
+  const inputRow = (key: string, title: string, hint: string, options: { type?: string; min?: number; max?: number; step?: string; suffix?: string } = {}) => row(key, title, hint,
+    <label className="settings-input">
+      <input type={options.type ?? "text"} inputMode={options.type === "number" ? "decimal" : undefined} value={String(draft?.[key] ?? "")} min={options.min} max={options.max} step={options.step} disabled={!draft || saving} aria-label={title} onChange={(event) => setValue(key, event.target.value)} />
+      {options.suffix && <span>{options.suffix}</span>}
+    </label>);
+  const tabLabel = t((settingsTabs.find(([key]) => key === tab) ?? settingsTabs[0])[1]);
+  return <div className="settings-layout"><aside className="panel settings-menu">{settingsTabs.map(([key, label, Icon]) => <button key={key} type="button" className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => setTab(key)}><Icon size={16} />{t(label)}<ChevronRight size={14} /></button>)}</aside><section className="panel settings-content">
+    <div className="settings-section">
+      <div className="section-kicker">{say(locale, "配置", "CONFIGURATION")}</div>
+      <h3>{tabLabel}</h3>
+      <p>{settingsTabHint(tab, locale)}</p>
+      {!draft && !error && <div className="auth-message" role="status">{say(locale, "正在加载设置…", "Loading settings…")}</div>}
+      {error && <div className="auth-message error" role="alert">{error}</div>}
+      {draft && tab === "platform" && <>
+        {row("storage", t("storageMode"), `${t("d1Mode")} · ${health?.capabilities?.trafficMetering ? t("active") : t("offline")}`, <span className={`status-chip ${health?.capabilities?.trafficMetering ? "" : "pending"}`}><i />{health?.capabilities?.trafficMetering ? t("active") : t("offline")}</span>)}
+        {toggleRow("registrationEnabled", say(locale, "开放注册", "Open registration"), say(locale, "关闭后注册接口返回 403。", "When off, sign-up returns 403."))}
+        {toggleRow("inviteRequired", say(locale, "注册需要邀请码", "Invite code required"), say(locale, "新用户必须携带有效邀请码才能注册。", "New accounts must present a valid invite code."))}
+        {toggleRow("emailVerificationRequired", say(locale, "需要邮箱验证", "Require email verification"), say(locale, "未验证邮箱的账户无法登录。", "Accounts must verify their email before signing in."))}
+        {inputRow("defaultBalance", say(locale, "新账户初始余额", "Starting balance"), say(locale, "以 USD 计的金额，创建账户时写入余额。", "USD amount credited when an account is created."), { suffix: "USD" })}
+        {inputRow("timezone", say(locale, "签到时区", "Check-in time zone"), say(locale, "IANA 名称，例如 Asia/Shanghai。", "IANA name, e.g. Asia/Shanghai."))}
+      </>}
+      {draft && tab === "security" && <>
+        {row("siteKey", say(locale, "Turnstile Site Key", "Turnstile site key"), publicConfig?.turnstileSiteKey ?? say(locale, "未配置，需要设置 TURNSTILE_SITE_KEY。", "Not configured; set TURNSTILE_SITE_KEY."), <span className={`status-chip ${publicConfig?.turnstileSiteKey ? "" : "pending"}`}><i />{publicConfig?.turnstileSiteKey ? say(locale, "已配置", "Configured") : say(locale, "缺失", "Missing")}</span>)}
+        {toggleRow("turnstileEnabled", say(locale, "注册要求人机验证", "Verify sign-ups"), say(locale, "注册时强制通过 Turnstile 校验。", "Require Turnstile on registration."))}
+        {toggleRow("turnstileOnCheckin", say(locale, "签到要求人机验证", "Verify check-ins"), say(locale, "签到请求必须携带有效校验令牌。", "Check-in requests must carry a valid token."))}
+        <p className="settings-note">{say(locale, "Turnstile 密钥通过 wrangler secret 配置，不在此页面保存。", "Turnstile keys are configured with wrangler secret and are never stored here.")}</p>
+      </>}
+      {draft && tab === "referrals" && <>
+        {toggleRow("userInvitesEnabled", say(locale, "允许用户生成邀请码", "Users can create invite codes"), say(locale, "关闭后只有管理员可以创建邀请码。", "When off, only admins can create invite codes."))}
+        {inputRow("userInviteLimit", say(locale, "每位用户的邀请码上限", "Invite codes per user"), say(locale, "0 表示不限制。", "0 means unlimited."), { type: "number", min: 0, max: 1000, step: "1" })}
+        {inputRow("referralPercent", say(locale, "返利比例", "Referral commission"), say(locale, "被邀请人付款时按比例返给邀请人。", "Share of each invitee payment credited to the inviter."), { type: "number", min: 0, max: 100, step: "0.1", suffix: "%" })}
+        {inputRow("referralValidityDays", say(locale, "返利有效期", "Referral validity"), say(locale, "超过该天数的订单不再返利。", "Orders placed after this window earn no commission."), { type: "number", min: 0, max: 3650, step: "1", suffix: say(locale, "天", "days") })}
+      </>}
+      {draft && tab === "attendance" && <>
+        {inputRow("checkinRewardGb", say(locale, "每日签到奖励", "Daily check-in reward"), say(locale, "签到后追加到本期流量额度。", "Added to the current traffic quota after check-in."), { type: "number", min: 0, max: 1000, step: "0.01", suffix: "GB" })}
+        {row("rewardPreview", say(locale, "折算字节", "In bytes"), say(locale, "按本项目十进制 GB 换算。", "Converted with decimal GB."), <strong className="settings-value">{formatBytes(Number(String(draft.checkinRewardGb ?? "0")) * 1_000_000_000)}</strong>)}
+      </>}
+      {draft && tab === "emails" && <>
+        {toggleRow("notifyTrafficExhausted", say(locale, "流量用尽", "Traffic exhausted"), say(locale, "用户流量耗尽时发送提醒。", "Email the user when their traffic runs out."))}
+        {toggleRow("notifySubscriptionExpired", say(locale, "订阅到期", "Subscription expired"), say(locale, "套餐到期后发送提醒。", "Email the user after their plan expires."))}
+        {toggleRow("notifyTrafficReset", say(locale, "流量重置", "Traffic reset"), say(locale, "周期流量重置时发送提醒。", "Email the user when their traffic resets."))}
+        {toggleRow("notifyOrderExpired", say(locale, "订单过期", "Order expired"), say(locale, "未支付的订单超时后发送提醒。", "Email the user when an unpaid order expires."))}
+        {toggleRow("notifyReferralReward", say(locale, "返利到账", "Referral reward"), say(locale, "邀请返利入账时通知邀请人。", "Notify the inviter when a commission is credited."))}
+        {toggleRow("notifyAccountCleanup", say(locale, "账户清理", "Account cleanup"), say(locale, "长期未活跃账户被清理前提醒。", "Warn before inactive accounts are removed."))}
+        <p className="settings-note">{say(locale, "邮件需要配置 RESEND_API_KEY 与 RESEND_FROM 才会真正发出。", "Emails are only delivered once RESEND_API_KEY and RESEND_FROM are set.")}</p>
+      </>}
+      {tab === "display" && <>
+        {row("theme", t("theme"), say(locale, "切换浅色或深色外观。", "Switch between light and dark."), <div className="segmented"><button type="button" className={theme === "light" ? "active" : ""} onClick={() => onTheme("light")}>{t("light")}</button><button type="button" className={theme === "dark" ? "active" : ""} onClick={() => onTheme("dark")}>{t("dark")}</button></div>)}
+        {row("accent", say(locale, "强调色", "Accent color"), say(locale, "影响按钮与高亮配色。", "Used by buttons and highlights."), <div className="swatch-row">{[["cyan", "#4de0c4"], ["blue", "#7599ff"], ["violet", "#ac8aff"], ["rose", "#fa8da7"], ["amber", "#f0bf66"]].map(([key, color]) => <button key={key} type="button" className={accent === key ? "active" : ""} style={{ "--swatch": color } as React.CSSProperties} aria-label={key} onClick={() => onAccent(key)} />)}</div>)}
+        {row("language", t("language"), say(locale, "选择界面语言。", "Choose the interface language."), <select className="settings-select" value={locale} onChange={(event) => onLocale(event.target.value as Locale)} aria-label={t("language")}>{LOCALES.map((code) => <option key={code} value={code}>{LOCALE_META[code].native}</option>)}</select>)}
+        <p className="settings-note">{say(locale, "外观与语言只保存在本机浏览器。", "Appearance and language are stored in this browser only.")}</p>
+      </>}
+    </div>
+    <div className="settings-actions">
+      <span>{tab === "display" ? say(locale, "这些偏好即时生效。", "These preferences apply instantly.") : say(locale, "设置保存在服务端，保存后立即生效。", "Settings are stored on the server and apply instantly.")}</span>
+      {tab !== "display" && <button className="primary-button" type="button" disabled={!draft || saving} onClick={() => { void save(); }}>{saving ? say(locale, "保存中…", "Saving…") : t("save")}</button>}
+    </div>
+  </section></div>;
 }
 
 function NotificationPopover({ items, locale, error, onRead, onClose }: { items: NotificationData[]; locale: Locale; error: string; onRead: (id: string) => void; onClose: () => void }) {

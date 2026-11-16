@@ -136,3 +136,14 @@
 .admin-form-section[open]>summary{margin-bottom:10px;border-bottom:1px solid var(--border);color:var(--text-primary)}
 .admin-form-section .admin-form-grid{gap:10px}
 .admin-form-section textarea{font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:11px;line-height:1.5}
+.settings-section+.settings-section{margin-top:16px}
+.settings-note{margin:12px 0 0;color:var(--text-faint);font-size:8px;line-height:1.6}
+.settings-value{font-size:10px;font-weight:650;color:var(--text-secondary)}
+.settings-input{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--surface-inset);color:var(--text-muted);font-size:8px}
+.settings-input input{width:112px;padding:0;border:0;background:transparent;color:var(--text-primary);font-size:9px;text-align:end}
+.settings-input input:disabled{opacity:.6}
+.settings-select{padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--surface-inset);color:var(--text-primary);font-size:9px}
+.toggle.off{background:var(--border);justify-content:flex-start}
+.toggle:disabled{opacity:.55;cursor:default}
+.setting-row>.segmented,.setting-row>.swatch-row{flex-direction:row;align-items:center;flex-shrink:0}
+.setting-row>.swatch-row{margin-top:0}
