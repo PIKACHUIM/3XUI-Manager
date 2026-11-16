@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "3xui-manager",
-      "database_id": "00000000-0000-0000-0000-000000000001",
+      "database_id": "6de4d6a8-512d-46cd-88e0-85fcec1da37d",
       "migrations_dir": "migrations"
     }
   ],
