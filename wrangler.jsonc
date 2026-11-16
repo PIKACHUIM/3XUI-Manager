@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "3xui-manager",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/webhooks/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "3xui-manager",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "APP_KV",
+      "id": "24dcf773551e43aebb83caa029c679f7"
+    }
+  ],
+  "vars": {
+    "STORAGE_DRIVER": "d1",
+    "APP_NAME": "3XUI Manager",
+    "REGISTRATION_ENABLED": "true"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}
