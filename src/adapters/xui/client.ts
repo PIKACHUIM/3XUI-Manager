@@ -95,7 +95,8 @@ function describePanelFailure(response: Response, payload: XuiEnvelope<unknown>)
   if (typeof payload.msg === "string" && payload.msg && payload.msg !== "non-JSON response") return `${payload.msg.slice(0, 180)} (${status})`;
   const type = response.headers.get("content-type")?.split(";")[0]?.trim() || "no content-type";
   const body = payload.raw?.replace(/\s+/g, " ").trim().slice(0, 120) ?? "";
-  return `${status}, ${type}${body ? `: ${body}` : ""}`;
+  const refused = /error code:\s*(520|521|522|523|524)/i.test(body);
+  return `${status}, ${type}${body ? `: ${body}` : ""}${refused ? " — the panel never answered Cloudflare; check its firewall for blocked Cloudflare ranges or expose it through a Cloudflare Tunnel" : ""}`;
 }
 
 /** True when an endpoint answered with a rendered page instead of the panel's JSON API. */
