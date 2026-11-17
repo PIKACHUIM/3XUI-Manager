@@ -162,6 +162,16 @@ describe("ThreeXuiClient login", () => {
     await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/HTTP 403, text\/html/);
   });
 
+  it("explains when the address is a dashboard instead of a panel", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const call = capture(input, init, []);
+      if (call.url.endsWith("/csrf-token")) return new Response("<!doctype html><html><body>dashboard</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+      return new Response(null, { status: 405 });
+    }));
+
+    await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/not the 3X-UI API/);
+  });
+
   it("keeps the password as a fallback when the API token is rejected", async () => {
     const calls: Call[] = [];
     let csrfCalls = 0;

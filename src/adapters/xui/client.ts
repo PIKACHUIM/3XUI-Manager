@@ -82,6 +82,13 @@ function describePanelFailure(response: Response, payload: XuiEnvelope<unknown>)
   return `${status}, ${type}`;
 }
 
+/** True when an endpoint answered with a rendered page instead of the panel's JSON API. */
+function servedMarkup(payload: XuiEnvelope<unknown>): boolean {
+  return typeof payload.obj === "string" && /^\s*<(!doctype|html|head|body)/i.test(payload.obj);
+}
+
+const WRONG_ADDRESS = "This address serves a web page, not the 3X-UI API; use the panel address such as http://host:2053.";
+
 /** Builds the 3X-UI add/update payload, keeping unknown top-level config keys. */
 export function inboundPayload(inbound: Inbound): Record<string, unknown> {
   const { settings, streamSettings, sniffing, ...extra } = inbound.config;
@@ -115,6 +122,7 @@ export class ThreeXuiClient {
   private cookie: string | null = null;
   private bearer: string | null = null;
   private csrf: string | null = null;
+  private panelServesMarkup = false;
 
   private constructor(private readonly env: RuntimeEnv, private readonly node: NodeRecord, private readonly password: string, private readonly token: string | null) {
     this.origin = validatePanelUrl(node.panelUrl);
@@ -150,7 +158,9 @@ export class ThreeXuiClient {
    * `/login` answers with an empty 403 instead of JSON.
    */
   private async login(): Promise<void> {
+    this.panelServesMarkup = false;
     await this.refreshCsrf();
+    if (this.panelServesMarkup) throw new Error(`3X-UI login failed: ${WRONG_ADDRESS}`);
     const attempts: Array<[string, string]> = [
       ["application/x-www-form-urlencoded", new URLSearchParams({ username: this.node.username, password: this.password }).toString()],
       ["application/json", JSON.stringify({ username: this.node.username, password: this.password })],
@@ -172,6 +182,10 @@ export class ThreeXuiClient {
         const cookie = readSessionCookie(response);
         const payload = await this.readEnvelope<unknown>(response);
         if (response.ok && payload.success !== false) {
+          if (servedMarkup(payload)) {
+            this.panelServesMarkup = true;
+            throw new Error(`3X-UI login failed: ${WRONG_ADDRESS}`);
+          }
           if (cookie) this.cookie = cookie;
           if (!this.cookie) throw new Error("3X-UI accepted the login but returned no session cookie; configure an API token for this node.");
           await this.refreshCsrf();
@@ -199,6 +213,10 @@ export class ThreeXuiClient {
       const cookie = readSessionCookie(response);
       if (cookie) this.cookie = cookie;
       const payload = await this.readEnvelope<string>(response);
+      if (servedMarkup(payload)) {
+        this.panelServesMarkup = true;
+        return;
+      }
       if (typeof payload.obj === "string" && payload.obj) this.csrf = payload.obj;
     } catch {
       this.csrf = null;
@@ -234,6 +252,7 @@ export class ThreeXuiClient {
       }
     }
     const payload = await this.readEnvelope<T>(response);
+    if (servedMarkup(payload)) throw new Error(`3X-UI request failed: ${WRONG_ADDRESS}`);
     if (!response.ok || payload.success === false) {
       throw new Error(`3X-UI request failed: ${describePanelFailure(response, payload)}`);
     }
