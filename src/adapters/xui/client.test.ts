@@ -181,6 +181,22 @@ describe("ThreeXuiClient login", () => {
     await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/cannot fetch a bare IP address/);
   });
 
+  it("routes an IPv4 panel through nip.io because Workers cannot fetch an IP", async () => {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const call = capture(input, init, calls);
+      if (call.url.endsWith("/csrf-token")) return json({ success: true, obj: "csrf" }, { cookie: "3x-ui=s; Path=/" });
+      if (call.url.endsWith("/login")) return json({ success: true }, { cookie: "3x-ui=s; Path=/" });
+      return json({ success: true, obj: [] });
+    }));
+
+    const client = await ThreeXuiClient.connect(env, await makeNode({ panelUrl: "http://43.226.62.230:61090" }));
+    await expect(client.listInbounds()).resolves.toEqual([]);
+
+    expect(calls.every((call) => new URL(call.url).hostname === "43.226.62.230.nip.io")).toBe(true);
+    expect(calls.at(-1)?.url).toBe("http://43.226.62.230.nip.io:61090/panel/api/inbounds/list");
+  });
+
   it("keeps the password as a fallback when the API token is rejected", async () => {
     const calls: Call[] = [];
     let csrfCalls = 0;

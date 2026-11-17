@@ -68,6 +68,19 @@ export function validatePanelUrl(input: string): URL {
   return url;
 }
 
+/**
+ * Workers refuse to connect to an IP literal and Cloudflare answers 403 "error code: 1003",
+ * so an IPv4 panel is fetched through nip.io, which resolves the same address under a hostname.
+ */
+function fetchableOrigin(url: URL): URL {
+  const octets = url.hostname.split(".");
+  const isIpv4 = octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+  if (!isIpv4) return url;
+  const rewritten = new URL(url.toString());
+  rewritten.hostname = `${url.hostname}.nip.io`;
+  return rewritten;
+}
+
 /** Replays every cookie the panel set on login, in the shape a browser would send back. */
 function readSessionCookie(response: Response): string | null {
   const headers = response.headers as Headers & { getSetCookie?: () => string[] };
@@ -138,7 +151,7 @@ export class ThreeXuiClient {
   private panelServesMarkup = false;
 
   private constructor(private readonly env: RuntimeEnv, private readonly node: NodeRecord, private readonly password: string, private readonly token: string | null) {
-    this.origin = validatePanelUrl(node.panelUrl);
+    this.origin = fetchableOrigin(validatePanelUrl(node.panelUrl));
   }
 
   static async connect(env: RuntimeEnv, node: NodeRecord): Promise<ThreeXuiClient> {
