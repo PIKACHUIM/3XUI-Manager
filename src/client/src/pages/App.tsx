@@ -668,7 +668,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
     }
   };
   const submitCheckin = async (turnstileToken?: string) => {
-    if (!overview?.capabilities.trafficMetering || !publicConfig || checkinBusy || (publicConfig.checkinTurnstileEnabled && !turnstileToken)) return;
+    if (!overview?.capabilities.trafficMetering || (overview.attendance.maxRewardBytes ?? overview.attendance.rewardBytes) <= 0 || !publicConfig || checkinBusy || (publicConfig.checkinTurnstileEnabled && !turnstileToken)) return;
     setApiError("");
     setCheckinBusy(true);
     try {
@@ -1019,6 +1019,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       </>)}
       {formSection(text("面板连接", "Panel connection"), <>
         {wideField("panelUrl", text("3X-UI 面板 HTTPS URL", "3X-UI panel HTTPS URL"), { type: "url", required: true, placeholder: "https://panel.example.com:54321" })}
+        <div className="admin-form-wide admin-form-note">{text("填写 3X-UI 面板本身的地址（例如 http://1.2.3.4:2053 或面板自己的域名），不要填本管理后台的地址。", "Use the 3X-UI panel's own address, such as http://1.2.3.4:2053 or the panel's own domain. Do not enter this dashboard's address.")}</div>
         {field("basePath", text("面板基础路径", "Panel base path"), { required: true })}
         {field("username", text("面板用户名", "Panel username"))}
       </>)}
@@ -1314,6 +1315,8 @@ function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, o
   const usagePercent = overview && overview.usage.limitBytes > 0 ? Math.min(100, overview.usage.usedBytes / overview.usage.limitBytes * 100) : 0;
   const attendanceMessage = !overview?.capabilities.trafficMetering
     ? say(locale, "当前存储模式不支持签到。", "Check-in is unavailable with this storage mode.")
+    : (overview.attendance.maxRewardBytes ?? overview.attendance.rewardBytes) <= 0
+      ? say(locale, "签到奖励暂未开放。", "Check-in rewards are currently disabled.")
     : overview.attendance.checkedInToday
       ? pick(locale, {
         zh: `今日已签到 · 连续 ${overview.attendance.streak} 天`,
