@@ -1,16 +1,33 @@
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { sign as signRsa, generateKeyPairSync } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { businessSettingNames, prepareBusinessSettings, readBusinessConfig } from "../services/settings";
+
+async function configureBusiness(values: Record<string, unknown>): Promise<RuntimeEnv> {
+  const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+  const settings = Object.fromEntries(Object.entries(businessSettingNames).filter(([name]) => values[name] !== undefined).map(([name, key]) => [key, values[name]]));
+  for (const [key, value] of Object.entries(await prepareBusinessSettings(settings, env))) {
+    await store.put("settings", key, { key, value, updatedAt: new Date().toISOString() });
+  }
+  return env;
+}
+
+afterEach(async () => {
+  if (!platform) return;
+  const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+  for (const key of Object.values(businessSettingNames)) await store.delete("settings", key);
+});
 import { fileURLToPath } from "node:url";
 import type { Inbound, Order, Plan, User } from "../domain/types";
 import type { RuntimeEnv } from "../env";
 import { createCheckout, expirePendingOrders, settleFailedOrder, settlePaidOrder } from "../services/billing";
 import { runLifecycleMaintenance } from "../services/lifecycle";
-import { createUserNotification } from "../services/notifications";
+import { createUserNotification, deliverPendingNotifications } from "../services/notifications";
 import { ThreeXuiClient, inboundPayload } from "../adapters/xui/client";
 import { D1Store } from "../storage/d1";
 import worker from "../worker";
+import { randomCheckinReward } from "../domain/defaults";
 
 const require = createRequire(import.meta.url);
 const { createD1TestPlatform } = require("../storage/d1-test-platform.cjs") as {
@@ -58,6 +75,52 @@ describe("admin API local D1 integration", () => {
 
   afterAll(async () => {
     await platform?.dispose();
+  });
+
+  it("encrypts settings, redacts secrets, preserves blank values and validates before writing", async () => {
+    const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
+    const put = (body: unknown) => request("/api/admin/settings", { method: "PUT", headers, body: JSON.stringify(body) });
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    expect((await put({ resendApiKey: "private-resend-key", resendFrom: "Sender <sender@example.test>", publicAppUrl: "https://manager.example.test" })).status).toBe(200);
+    const stored = await store.get<{ value: string }>("settings", "resendApiKey");
+    expect(stored?.value).toMatch(/^encrypted:v1:/);
+    expect(stored?.value).not.toContain("private-resend-key");
+    const result = await (await request("/api/admin/settings", { headers })).json();
+    expect(result).toMatchObject({ settings: { resendApiKey: "" }, secretConfigured: { resendApiKey: true } });
+    expect(JSON.stringify(result)).not.toContain(stored!.value);
+    expect((await put({ resendApiKey: "" })).status).toBe(200);
+    expect(await store.get("settings", "resendApiKey")).toEqual(stored);
+    expect(await readBusinessConfig(env, ["RESEND_API_KEY"])).toEqual({ RESEND_API_KEY: "private-resend-key" });
+    expect((await put({ publicAppUrl: "https://changed.example.test", waffoEnvironment: "invalid" })).status).toBe(422);
+    expect(await store.get("settings", "publicAppUrl")).toMatchObject({ value: "https://manager.example.test" });
+    expect((await put({ publicAppUrl: "https://changed.example.test", referralPercent: 101 })).status).toBe(422);
+    expect(await store.get("settings", "publicAppUrl")).toMatchObject({ value: "https://manager.example.test" });
+    expect((await put({ resendApiKey: null })).status).toBe(200);
+    expect(await readBusinessConfig({ ...env, RESEND_API_KEY: "ignored-old-env" } as RuntimeEnv, ["RESEND_API_KEY"])).toEqual({});
+    expect(await (await request("/api/admin/settings", { headers })).json()).toMatchObject({ secretConfigured: { resendApiKey: false } });
+  });
+
+  it("delivers scheduled notification retries using stored settings and ignores legacy env credentials", async () => {
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    const user = (await store.list<User>("users")).items[0]!;
+    const legacyEnv = { ...env, RESEND_API_KEY: "legacy-ignored", RESEND_FROM: "legacy@example.test" } as RuntimeEnv;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer stored-retry-key");
+      return Response.json({ id: "sent" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const id = "settings-retry-test";
+    try {
+      await createUserNotification(store, legacyEnv, { id, userId: user.id, type: "traffic-reset", title: "Retry", body: "Retry", emailEnabled: true });
+      expect(fetchMock).not.toHaveBeenCalled();
+      await configureBusiness({ RESEND_API_KEY: "stored-retry-key", RESEND_FROM: "stored@example.test" });
+      expect(await deliverPendingNotifications(store, legacyEnv)).toBe(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(await store.get("notifications", `${user.id}:${id}`)).toMatchObject({ emailStatus: "sent" });
+    } finally {
+      await store.delete("notifications", `${user.id}:${id}`);
+      vi.unstubAllGlobals();
+    }
   });
 
   it("loads admin dashboard collections and creates then updates a plan", async () => {
@@ -197,6 +260,77 @@ describe("admin API local D1 integration", () => {
     }
   });
 
+  it("samples inclusive reward boundaries without bias at safe integer limits", () => {
+    const random = vi.spyOn(crypto, "getRandomValues");
+    try {
+      random.mockImplementation((array) => { (array as Uint32Array).set([0, 0]); return array; });
+      expect(randomCheckinReward({ minRewardBytes: 0, maxRewardBytes: 10 })).toBe(0);
+      random.mockImplementation((array) => { (array as Uint32Array).set([0, 10]); return array; });
+      expect(randomCheckinReward({ minRewardBytes: 0, maxRewardBytes: 10 })).toBe(10);
+      random.mockImplementation((array) => { (array as Uint32Array).set([0x1fffff, 0xffffffff]); return array; });
+      expect(randomCheckinReward({ minRewardBytes: 0, maxRewardBytes: Number.MAX_SAFE_INTEGER })).toBe(Number.MAX_SAFE_INTEGER);
+      random.mockImplementationOnce((array) => { (array as Uint32Array).set([0x1fffff, 0xffffffff]); return array; })
+        .mockImplementationOnce((array) => { (array as Uint32Array).set([0, 1]); return array; });
+      expect(randomCheckinReward({ minRewardBytes: 5, maxRewardBytes: 7 })).toBe(6);
+      random.mockClear();
+      expect(randomCheckinReward({ minRewardBytes: 7, maxRewardBytes: 7 })).toBe(7);
+      expect(random).not.toHaveBeenCalled();
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("validates the merged check-in range before writing any settings", async () => {
+    const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
+    const put = (body: unknown) => request("/api/admin/settings", { method: "PUT", headers, body: JSON.stringify(body) });
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    const previous = await store.get("settings", "registrationEnabled");
+    try {
+      expect((await put({ checkinMinTrafficBytes: 0, checkinMaxTrafficBytes: 10 })).status).toBe(200);
+      for (const body of [
+        { checkinMinTrafficBytes: 11 }, { checkinMaxTrafficBytes: -1 },
+        { checkinMinTrafficBytes: 0.5 }, { checkinMaxTrafficBytes: Number.MAX_SAFE_INTEGER + 1 },
+        { checkinMaxTrafficBytes: "10" }, { checkinMinTrafficBytes: null }, { checkinTrafficBytes: -1 },
+      ]) {
+        expect((await put({ registrationEnabled: false, ...body })).status).toBe(422);
+        expect(await store.get("settings", "registrationEnabled")).toEqual(previous);
+      }
+      expect((await put({ checkinMinTrafficBytes: 0, checkinMaxTrafficBytes: 0 })).status).toBe(200);
+      expect((await request("/api/user/checkin", { method: "POST", headers, body: "{}" })).status).toBe(422);
+    } finally {
+      await store.delete("settings", "checkinMinTrafficBytes");
+      await store.delete("settings", "checkinMaxTrafficBytes");
+    }
+  });
+
+  it("allows zero random rewards and never draws again for a duplicate check-in", async () => {
+    const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    const user = (await store.list<User>("users")).items[0]!;
+    const oldState = { planTrafficBytes: user.planTrafficBytes, checkinStreak: user.checkinStreak, lastCheckinAt: user.lastCheckinAt, updatedAt: user.updatedAt };
+    for (const [key, value] of Object.entries({ checkinMinTrafficBytes: 0, checkinMaxTrafficBytes: 10 })) await store.put("settings", key, { key, value });
+    await store.patchUser(user.id, { lastCheckinAt: null, checkinStreak: 0 });
+    const random = vi.spyOn(crypto, "getRandomValues").mockImplementation((array) => { (array as Uint32Array).fill(0); return array; });
+    try {
+      expect(await (await request("/api/user/overview", { headers })).json()).toMatchObject({ attendance: { rewardBytes: 0, minRewardBytes: 0, maxRewardBytes: 10 } });
+      const response = await request("/api/user/checkin", { method: "POST", headers, body: "{}" });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ rewardBytes: 0, checkinStreak: 1, planTrafficBytes: user.planTrafficBytes });
+      const draws = random.mock.calls.length;
+      expect(draws).toBeGreaterThan(0);
+      expect((await request("/api/user/checkin", { method: "POST", headers, body: "{}" })).status).toBe(409);
+      expect(random).toHaveBeenCalledTimes(draws);
+      expect(await store.get("users", user.id)).toMatchObject({ planTrafficBytes: user.planTrafficBytes, checkinStreak: 1 });
+      await store.put("settings", "checkinMinTrafficBytes", { value: 11 });
+      expect((await request("/api/user/checkin", { method: "POST", headers, body: "{}" })).status).toBe(503);
+    } finally {
+      random.mockRestore();
+      await store.patchUser(user.id, oldState);
+      await store.delete("settings", "checkinMinTrafficBytes");
+      await store.delete("settings", "checkinMaxTrafficBytes");
+    }
+  });
+
   it("applies one configured check-in reward per day with D1 atomic state", async () => {
     const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
     const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
@@ -215,6 +349,7 @@ describe("admin API local D1 integration", () => {
       const result = await response.json() as { rewardBytes: number; checkinStreak: number; planTrafficBytes: number; syncStatus: string };
       expect(result).toMatchObject({ rewardBytes: 200 * 1024 * 1024, checkinStreak: 1, planTrafficBytes: oldState.planTrafficBytes + 200 * 1024 * 1024 });
       expect(result.syncStatus).toBe("synced");
+      expect(await (await request("/api/user/overview", { headers })).json()).toMatchObject({ attendance: { rewardBytes: 200 * 1024 * 1024, minRewardBytes: 200 * 1024 * 1024, maxRewardBytes: 200 * 1024 * 1024 } });
 
       const duplicate = await request("/api/user/checkin", { method: "POST", headers, body: "{}" });
       expect(duplicate.status).toBe(409);
@@ -256,7 +391,7 @@ describe("admin API local D1 integration", () => {
       expect(form.get("response")).toBeTruthy();
       return new Response(JSON.stringify(verificationResults.shift()), { status: 200 });
     });
-    env = { ...env, TURNSTILE_SITE_KEY: "local-turnstile-site-key", TURNSTILE_SECRET_KEY: "local-turnstile-secret" } as RuntimeEnv;
+    await configureBusiness({ TURNSTILE_SITE_KEY: "local-turnstile-site-key", TURNSTILE_SECRET_KEY: "local-turnstile-secret" });
     vi.stubGlobal("fetch", fetchMock);
     try {
       const now = new Date().toISOString();
@@ -643,10 +778,10 @@ describe("admin API local D1 integration", () => {
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
     const previousEnv = env;
-    env = {
-      ...env, WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: keys.privateKey,
+    await configureBusiness({
+      WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: keys.privateKey,
       WAFFO_PUBLIC_KEY: keys.publicKey, WAFFO_MERCHANT_ID: "local-merchant", WAFFO_ENVIRONMENT: "sandbox",
-    } as RuntimeEnv;
+    });
     const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
     const user = (await store.list<User>("users")).items[0];
     expect(user).toBeTruthy();
@@ -708,10 +843,10 @@ describe("admin API local D1 integration", () => {
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
     const previousEnv = env;
-    env = {
-      ...env, WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: keys.privateKey,
+    await configureBusiness({
+      WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: keys.privateKey,
       WAFFO_PUBLIC_KEY: keys.publicKey, WAFFO_MERCHANT_ID: "local-merchant", WAFFO_ENVIRONMENT: "sandbox",
-    } as RuntimeEnv;
+    });
     const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
     const user = (await store.list<User>("users")).items[0];
     expect(user).toBeTruthy();
@@ -785,10 +920,10 @@ describe("admin API local D1 integration", () => {
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
     const previousEnv = env;
-    env = {
-      ...env, WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: merchantKeys.privateKey,
+    await configureBusiness({
+      WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: merchantKeys.privateKey,
       WAFFO_PUBLIC_KEY: providerKeys.publicKey, WAFFO_MERCHANT_ID: "local-merchant", WAFFO_ENVIRONMENT: "sandbox",
-    } as RuntimeEnv;
+    });
     const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
     const user = (await store.list<User>("users")).items[0];
     expect(user).toBeTruthy();
@@ -976,7 +1111,7 @@ describe("admin API local D1 integration", () => {
     const user = (await store.list<User>("users")).items[0];
     expect(user).toBeTruthy();
     const id = `email-notification-${crypto.randomUUID()}`;
-    const emailEnv = { ...env, RESEND_API_KEY: "local-resend-test-key", RESEND_FROM: "Test <noreply@example.test>" } as RuntimeEnv;
+    const emailEnv = await configureBusiness({ RESEND_API_KEY: "local-resend-test-key", RESEND_FROM: "Test <noreply@example.test>" });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe("https://api.resend.com/emails");
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer local-resend-test-key");
@@ -1076,10 +1211,10 @@ describe("admin API local D1 integration", () => {
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
     const previousEnv = env;
-    env = {
-      ...env, WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: keys.privateKey, WAFFO_PUBLIC_KEY: keys.publicKey,
+    await configureBusiness({
+      WAFFO_API_KEY: "local-waffo-test-key", WAFFO_SIGNING_KEY: keys.privateKey, WAFFO_PUBLIC_KEY: keys.publicKey,
       WAFFO_MERCHANT_ID: "local-merchant", WAFFO_ENVIRONMENT: "sandbox", PUBLIC_APP_URL: "https://manager.example.test",
-    } as RuntimeEnv;
+    });
     const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
     const current = balancePlan("balance-current", 1, 1000);
     const next = balancePlan("balance-next", 2, 3000);

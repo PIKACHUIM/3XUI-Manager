@@ -1,4 +1,5 @@
 import type { RuntimeEnv } from "../../env";
+import { readBusinessConfig, type BusinessConfig } from "../../services/settings";
 import type { Order, Plan, User } from "../../domain/types";
 import { verifyHmacSha256 } from "./crypto";
 import type { CheckoutResult } from "./waffo";
@@ -8,21 +9,22 @@ interface DodoCheckoutResponse {
   checkout_url?: string | null;
 }
 
-function dodoBaseUrl(env: RuntimeEnv): string {
-  return env.DODO_ENVIRONMENT === "test_mode" ? "https://test.dodopayments.com" : "https://live.dodopayments.com";
+function dodoBaseUrl(config: BusinessConfig): string {
+  return config.DODO_ENVIRONMENT === "test_mode" ? "https://test.dodopayments.com" : "https://live.dodopayments.com";
 }
 
 export async function createDodoCheckout(env: RuntimeEnv, order: Order, user: User, plan: Plan | null): Promise<CheckoutResult> {
-  if (!env.DODO_API_KEY) throw new Error("Dodo Payments requires DODO_API_KEY.");
-  const productId = plan?.dodoProductId ?? (order.type === "topup" ? env.DODO_TOPUP_PRODUCT_ID : undefined);
+  const config = await readBusinessConfig(env, ["DODO_API_KEY", "DODO_ENVIRONMENT", "DODO_TOPUP_PRODUCT_ID", "PUBLIC_APP_URL"]);
+  if (!config.DODO_API_KEY) throw new Error("Dodo Payments requires DODO_API_KEY.");
+  const productId = plan?.dodoProductId ?? (order.type === "topup" ? config.DODO_TOPUP_PRODUCT_ID : undefined);
   if (!productId) throw new Error("Configure a Dodo product ID for this plan before enabling Dodo checkout.");
   if (order.type === "upgrade" && plan && order.amountMinor !== plan.priceMinor) throw new Error("Dodo cannot represent this discounted upgrade price with the configured fixed-price product. Use a provider that supports custom order amounts or configure a matching Dodo product.");
   if (order.type === "topup") throw new Error("Dodo top-ups require a fixed product price matching the requested amount; custom top-up pricing is not enabled.");
-  const appUrl = env.PUBLIC_APP_URL;
+  const appUrl = config.PUBLIC_APP_URL;
   if (!appUrl || new URL(appUrl).protocol !== "https:") throw new Error("PUBLIC_APP_URL must use HTTPS for payment callbacks.");
-  const response = await fetch(`${dodoBaseUrl(env)}/checkouts`, {
+  const response = await fetch(`${dodoBaseUrl(config)}/checkouts`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${env.DODO_API_KEY}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${config.DODO_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       product_cart: [{ product_id: productId, quantity: 1 }],
       customer: { email: user.email },
@@ -39,7 +41,8 @@ export async function createDodoCheckout(env: RuntimeEnv, order: Order, user: Us
   return { checkoutUrl: checkoutUrl.toString(), providerOrderId: result.session_id };
 }
 
-export async function verifyDodoWebhook(rawBody: string, headers: Headers, secret: string | undefined): Promise<{ orderId: string; eventId: string; succeeded: boolean; final: boolean; amountMinor?: number; currency?: string } | null> {
+export async function verifyDodoWebhook(rawBody: string, headers: Headers, env: RuntimeEnv): Promise<{ orderId: string; eventId: string; succeeded: boolean; final: boolean; amountMinor?: number; currency?: string } | null> {
+  const { DODO_WEBHOOK_KEY: secret } = await readBusinessConfig(env, ["DODO_WEBHOOK_KEY"]);
   const id = headers.get("webhook-id") ?? "";
   const timestamp = headers.get("webhook-timestamp") ?? "";
   const signature = headers.get("webhook-signature") ?? "";

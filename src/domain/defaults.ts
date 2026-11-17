@@ -73,6 +73,39 @@ export async function readSetting<T>(store: DocumentStore, key: string, fallback
   return row?.value ?? fallback;
 }
 
+export interface CheckinRewardRange {
+  minRewardBytes: number;
+  maxRewardBytes: number;
+}
+
+export async function readCheckinRewardRange(store: DocumentStore, overrides: Record<string, unknown> = {}): Promise<CheckinRewardRange | null> {
+  const keys = ["checkinTrafficBytes", "checkinMinTrafficBytes", "checkinMaxTrafficBytes"];
+  const values = await Promise.all(keys.map(async (key) => {
+    if (Object.hasOwn(overrides, key)) return overrides[key];
+    return (await store.get<{ value: unknown }>("settings", key))?.value;
+  }));
+  const legacy = values[0] === undefined ? defaultSettings.checkinTrafficBytes : values[0];
+  const min = values[1] === undefined ? legacy : values[1];
+  const max = values[2] === undefined ? legacy : values[2];
+  if (typeof min !== "number" || typeof max !== "number" || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || min > max) return null;
+  return { minRewardBytes: min, maxRewardBytes: max };
+}
+
+/** Rejection sampling over 53 random bits avoids modulo bias, including the safe-integer limit. */
+export function randomCheckinReward({ minRewardBytes: min, maxRewardBytes: max }: CheckinRewardRange): number {
+  if (min === max) return min;
+  const width = BigInt(max) - BigInt(min) + 1n;
+  const space = 1n << 53n;
+  const limit = space - space % width;
+  const words = new Uint32Array(2);
+  let sample: bigint;
+  do {
+    crypto.getRandomValues(words);
+    sample = (BigInt(words[0]! & 0x1fffff) << 32n) | BigInt(words[1]!);
+  } while (sample >= limit);
+  return min + Number(sample % width);
+}
+
 export async function writeSetting<T>(store: DocumentStore, key: string, value: T): Promise<void> {
   await store.put("settings", key, { key, value, updatedAt: new Date().toISOString() });
 }

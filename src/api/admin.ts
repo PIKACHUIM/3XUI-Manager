@@ -1,6 +1,7 @@
 import { Hono } from "hono";
+import { businessSettingKeys, prepareBusinessSettings, publicSettings, validateBusinessSetting } from "../services/settings";
 import type { Context } from "hono";
-import { FREE_PLAN_ID, defaultPlan, ensureDefaultPlan, readSetting, writeSetting } from "../domain/defaults";
+import { FREE_PLAN_ID, defaultPlan, ensureDefaultPlan, readCheckinRewardRange, readSetting, writeSetting } from "../domain/defaults";
 import { encryptSecret, hashPassword } from "../domain/security";
 import type { ApiEnv } from "./context";
 import { requireAdmin, validateSameOrigin } from "./context";
@@ -612,27 +613,43 @@ admin.delete("/orders/:id", requireAdmin, async (c) => {
 
 admin.get("/settings", requireAdmin, async (c) => {
   const settings = await listAll<{ key: string; value: unknown; updatedAt: string }>(c.get("store"), "settings");
-  return c.json({ settings: Object.fromEntries(settings.map(({ key, value }) => [key, value])) });
+  return c.json(publicSettings(Object.fromEntries(settings.map(({ key, value }) => [key, value]))));
 });
 
 admin.put("/settings", requireAdmin, async (c) => {
   const body = await parseBody(c);
   if (!body) return c.json({ error: "Settings object is required." }, 400);
   const allowed = new Set([
+    ...businessSettingKeys,
     "registrationEnabled", "emailVerificationRequired", "turnstileEnabled", "turnstileOnCheckin", "inviteRequired",
     "userInvitesEnabled", "userInviteLimit", "defaultBalanceMinor", "referralPercent", "referralValidityDays",
-    "checkinTrafficBytes", "deleteInactiveAfterDays", "deleteWithoutPlanAfterDays", "warnBeforeDeleteDays",
+    "checkinTrafficBytes", "checkinMinTrafficBytes", "checkinMaxTrafficBytes", "deleteInactiveAfterDays", "deleteWithoutPlanAfterDays", "warnBeforeDeleteDays",
     "notifyTrafficExhausted", "notifySubscriptionExpired", "notifyTrafficReset", "notifyOrderExpired", "notifyReferralReward", "notifyAccountCleanup", "timezone", "planGroups",
   ]);
   for (const [key, value] of Object.entries(body)) {
     if (!allowed.has(key)) continue;
+    const configError = validateBusinessSetting(key, value);
+    if (configError) return c.json({ error: configError }, 422);
+    if (["registrationEnabled", "emailVerificationRequired", "turnstileEnabled", "turnstileOnCheckin", "inviteRequired", "userInvitesEnabled"].includes(key) && typeof value !== "boolean") return c.json({ error: `${key} must be boolean.` }, 422);
     if (key === "referralPercent" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100)) return c.json({ error: "Referral percent must be between 0 and 100." }, 422);
     if (key === "referralValidityDays" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 3650)) return c.json({ error: "Referral validity must be between 0 and 3650 days." }, 422);
     if (["deleteInactiveAfterDays", "deleteWithoutPlanAfterDays", "warnBeforeDeleteDays"].includes(key) && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 3650)) return c.json({ error: "Account retention days must be between 0 and 3650." }, 422);
     if (["notifyTrafficExhausted", "notifySubscriptionExpired", "notifyTrafficReset", "notifyOrderExpired", "notifyReferralReward", "notifyAccountCleanup"].includes(key) && typeof value !== "boolean") return c.json({ error: "Notification settings must be boolean." }, 422);
     if (key === "userInviteLimit" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 1000)) return c.json({ error: "Invite limit is out of range." }, 422);
-    await writeSetting(c.get("store"), key, value);
   }
+  const rewardKeys = ["checkinTrafficBytes", "checkinMinTrafficBytes", "checkinMaxTrafficBytes"];
+  if (rewardKeys.some((key) => Object.hasOwn(body, key))) {
+    if (rewardKeys.some((key) => Object.hasOwn(body, key) && (typeof body[key] !== "number" || !Number.isSafeInteger(body[key]) || (body[key] as number) < 0)) || !(await readCheckinRewardRange(c.get("store"), body))) {
+      return c.json({ error: "Check-in rewards must be safe integers with 0 <= minimum <= maximum." }, 422);
+    }
+  }
+  let prepared: Record<string, unknown>;
+  try {
+    prepared = await prepareBusinessSettings(Object.fromEntries(Object.entries(body).filter(([key]) => allowed.has(key))), c.env);
+  } catch {
+    return c.json({ error: "Credentials could not be encrypted. Configure APP_ENCRYPTION_KEY with at least 32 characters." }, 422);
+  }
+  for (const [key, value] of Object.entries(prepared)) await writeSetting(c.get("store"), key, value);
   return c.json({ ok: true });
 });
 

@@ -7,7 +7,6 @@ interface __BaseEnv_Env {
 	ASSETS: Fetcher;
 	STORAGE_DRIVER: "d1";
 	APP_NAME: "3XUI Manager";
-	REGISTRATION_ENABLED: "true";
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -20,7 +19,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "STORAGE_DRIVER" | "APP_NAME" | "REGISTRATION_ENABLED">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "STORAGE_DRIVER" | "APP_NAME">> {}
 }
 declare module "*.txt" {
 	const value: string;

@@ -1,6 +1,7 @@
 import type { RuntimeEnv } from "../env";
 import type { DocumentStore, Page } from "../storage/store";
 import { sendEmail } from "./email";
+import { readBusinessConfig } from "./settings";
 
 export type NotificationType = "order-expired" | "traffic-exhausted" | "subscription-expired" | "traffic-reset" | "referral-reward" | "account-cleanup";
 export type NotificationEmailStatus = "disabled" | "pending" | "sent" | "failed";
@@ -37,7 +38,8 @@ export function notificationRecordId(userId: string, id: string): string {
 }
 
 async function tryDeliver(store: DocumentStore, env: RuntimeEnv, recordId: string): Promise<void> {
-  if (!env.RESEND_API_KEY || !env.RESEND_FROM) return;
+  const config = await readBusinessConfig(env, ["RESEND_API_KEY", "RESEND_FROM"], store);
+  if (!config.RESEND_API_KEY || !config.RESEND_FROM) return;
   const lockName = `notification-send:${recordId}`;
   const owner = crypto.randomUUID();
   if (!(await store.acquireLease(lockName, owner, Date.now() + 60_000))) return;
@@ -111,7 +113,8 @@ async function listAll<T>(store: DocumentStore, collection: string): Promise<T[]
 }
 
 export async function deliverPendingNotifications(store: DocumentStore, env: RuntimeEnv): Promise<number> {
-  if (!env.RESEND_API_KEY || !env.RESEND_FROM) return 0;
+  const config = await readBusinessConfig(env, ["RESEND_API_KEY", "RESEND_FROM"], store);
+  if (!config.RESEND_API_KEY || !config.RESEND_FROM) return 0;
   const now = Date.now();
   const pending = (await listAll<UserNotification>(store, "notifications"))
     .filter((notification) => notification.emailEnabled && (notification.emailStatus === "pending" || notification.emailStatus === "failed") && notification.emailAttempts < 5 && (!notification.emailNextAttemptAt || Date.parse(notification.emailNextAttemptAt) <= now));

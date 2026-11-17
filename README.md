@@ -16,15 +16,15 @@
 - D1 定时维护负责过期待付款订单、用户通知及可选的账户保留清理。
 - 被邀请用户的成功付款可按配置向邀请人账户记入幂等奖励。
 
-> 当前管理 UI 通过弹窗创建/编辑节点、入站、套餐和用户；管理员可手动创建用户并设置初始密码和套餐，新建账号会直接标记为邮箱已验证，可立即登录；用户列表还提供“充值 / 退款”弹窗，用于人工增减余额并留下订单记录。还支持启停用户/套餐/入站/节点和探测节点。入站节点绑定只在创建时设置；暂不提供节点/入站删除界面。管理员增长图表尚无聚合数据源，系统设置页面仍是占位 UI。用户订阅链接复制和部分动态信息尚未接通服务端。签到已接入 D1 API；无 D1 存储模式会明确禁用。注册与签到现已接入 Turnstile widget/token 流程，后端会校验 action 和请求主机名；启用前必须配置有效的 Site Key、Secret Key 和对应 widget 域名。当前没有真实 Turnstile 凭据，因此未做真实 token 验证。请勿将未接通页面上的静态文案视为线上状态或交易记录。
+> 当前管理 UI 通过弹窗创建/编辑节点、入站、套餐和用户；管理员可手动创建用户并设置初始密码和套餐，新建账号会直接标记为邮箱已验证，可立即登录；用户列表还提供“充值 / 退款”弹窗，用于人工增减余额并留下订单记录。还支持启停用户/套餐/入站/节点和探测节点。入站节点绑定只在创建时设置；暂不提供节点/入站删除界面。管理员增长图表尚无聚合数据源；系统设置页面支持验证码、Waffo 支付、Resend 邮件及签到奖励范围。用户订阅链接复制和部分动态信息尚未接通服务端。签到已接入 D1 API；无 D1 存储模式会明确禁用。系统设置以十进制 GB 配置最小/最大奖励，服务端在包含两端的整数 Byte 范围内均匀随机发放；上下限相同为固定奖励，最大值为 0 时关闭签到奖励。旧 `checkinTrafficBytes` 配置兼容为相同上下限；每天按配置时区仅可领取一次。注册与签到现已接入 Turnstile widget/token 流程，后端会校验 action 和请求主机名；启用前必须配置有效的 Site Key、Secret Key 和对应 widget 域名。当前没有真实 Turnstile 凭据，因此未做真实 token 验证。请勿将未接通页面上的静态文案视为线上状态或交易记录。
 
 界面支持简体中文、繁体中文、英语、日语、韩语、德语、西班牙语、葡萄牙语、意大利语、阿拉伯语、俄语和法语，可在顶栏语言菜单切换并记住选择；阿拉伯语会自动切换为从右到左布局。主题默认跟随浏览器/操作系统配色，手动切换后会记住所选主题。
 
 ## 通知、推荐奖励与账户保留
 
 - 用户可通过仪表盘铃铛查看通知。`GET /api/user/notifications` 只返回当前用户的通知；`POST /api/user/notifications/:id/read` 将该条通知标记为已读。事件包括订单过期、流量耗尽、订阅过期、流量重置、推荐奖励和账户清理预警。
-- Worker Cron 每分钟运行 D1 生命周期维护；待付款订单从创建起 30 分钟后过期。邮件投递为可选功能，须同时配置 `RESEND_API_KEY` 和 `RESEND_FROM`；已启用的通知邮件最多重试五次。邮件不可用不影响站内通知记录。本地邮件测试使用 mock，尚未验证 Resend 真实投递。
-- 推荐设置通过管理员鉴权的 `GET/PUT /api/admin/settings` API 保存，默认值为 `referralPercent: 10`、`referralValidityDays: 30`。被邀请账户在有效期限内完成付款后，只有邀请人账户已启用且套餐币种匹配时才会记入奖励；D1 ledger 幂等性避免重复入账。系统设置 UI 仍是占位页面。
+- Worker Cron 每分钟运行 D1 生命周期维护；待付款订单从创建起 30 分钟后过期。邮件投递为可选功能，须在系统设置同时配置 `resendApiKey` 和 `resendFrom`；已启用的通知邮件最多重试五次。邮件不可用不影响站内通知记录。本地邮件测试使用 mock，尚未验证 Resend 真实投递。
+- 推荐设置通过管理员鉴权的 `GET/PUT /api/admin/settings` API 保存，默认值为 `referralPercent: 10`、`referralValidityDays: 30`。被邀请账户在有效期限内完成付款后，只有邀请人账户已启用且套餐币种匹配时才会记入奖励；D1 ledger 幂等性避免重复入账。可在系统设置页面修改推荐参数。
 - 账户清理默认关闭：`deleteInactiveAfterDays` 与 `deleteWithoutPlanAfterDays` 默认为 `0`；`warnBeforeDeleteDays` 默认为 `3`。启用后，仅评估满足对应不活跃或无有效套餐期限的启用普通用户；管理员、有非零余额、有效付费套餐、邀请关系、待付款订单或现有客户端映射的账户不会清理。清理会删除用户记录、会话、邮箱索引和通知，但保留历史订单/付款记录，因此它不是完整的数据擦除机制。相关设置须通过管理员鉴权的 `/api/admin/settings` API 修改，启用前应审阅清理条件和数据影响。
 
 ## 本地开发
@@ -37,7 +37,7 @@ npm run db:local
 npm run dev
 ```
 
-`npm run dev` 由 Vite Cloudflare 插件启动本地 Workers 预览。需要本地管理员/面板/邮件/支付流程时，在项目根目录创建被 Git 忽略的 `.dev.vars` 并填写对应开发密钥；不要将密钥粘贴到源码、`wrangler.jsonc` 或提交记录。没有 Waffo 沙箱配置时，普通页面和 API 可开发，但下单会失败。不要用生产商户密钥做本地测试。
+`npm run dev` 由 Vite Cloudflare 插件启动本地 Workers 预览。在项目根目录被 Git 忽略的 `.dev.vars` 中仅填写 `ADMIN_BOOTSTRAP_TOKEN`、`APP_ENCRYPTION_KEY` 等部署密钥；管理员登录后在系统设置填写验证码、邮件和支付配置；不要将密钥粘贴到源码、`wrangler.jsonc` 或提交记录。没有 Waffo 沙箱配置时，普通页面和 API 可开发，但下单会失败。不要用生产商户密钥做本地测试。
 
 常用本地检查：
 
@@ -59,27 +59,21 @@ npm run preview
    ```
 
 2. 将创建结果中的真实 `database_id` 更新到 `wrangler.jsonc` 的 `d1_databases[0]`。当前配置中的 `00000000-0000-0000-0000-000000000001` 只是占位符。保留 binding 名 `DB`、数据库名 `3xui-manager` 及 `migrations_dir: "migrations"`。
-3. 确认 Worker vars：`STORAGE_DRIVER=d1`、`REGISTRATION_ENABLED=true`；将 `PUBLIC_APP_URL` 配为最终 HTTPS 源站/Worker 域名。项目依赖同源 API 与 Webhook，不应把前端和 API 拆到不同域名。
+3. 确认 Worker vars：`STORAGE_DRIVER=d1`；管理员系统设置中的 `registrationEnabled` 控制注册，`publicAppUrl` 配为最终 HTTPS 源站/Worker 域名。项目依赖同源 API 与 Webhook，不应把前端和 API 拆到不同域名。
 4. 在部署前登记所需密钥（Wrangler 会交互式要求输入；命令不包含密钥值）：
 
    ```bash
    npx wrangler secret put ADMIN_BOOTSTRAP_TOKEN
    npx wrangler secret put APP_ENCRYPTION_KEY
-   npx wrangler secret put RESEND_API_KEY
-   npx wrangler secret put RESEND_FROM
-   npx wrangler secret put WAFFO_API_KEY
-   npx wrangler secret put WAFFO_SIGNING_KEY
-   npx wrangler secret put WAFFO_PUBLIC_KEY
-   npx wrangler secret put WAFFO_MERCHANT_ID
    ```
 
-   `APP_ENCRYPTION_KEY` 至少 32 个字符，并须持久保存；它用于加密 3X-UI 面板凭据。更换密钥前必须先设计并验证已有密文的重加密方案，否则既有凭据将无法解密。`WAFFO_SIGNING_KEY` 是商户私钥，用于请求签名及签署回执；`WAFFO_PUBLIC_KEY` 用于验签。不得把它们互换。
+   `APP_ENCRYPTION_KEY` 至少 32 个字符，并须持久保存；它用于加密 3X-UI 面板凭据及系统设置中的敏感凭据。更换密钥前必须先设计并验证已有密文的重加密方案，否则既有凭据将无法解密。`WAFFO_SIGNING_KEY` 是商户私钥，用于请求签名及签署回执；`WAFFO_PUBLIC_KEY` 用于验签。不得把它们互换。
 5. 邮件验证默认开启，因此需要有效的 Resend 配置，才能让普通注册用户完成验证。首次管理员通过登录页的“First-time admin setup”流程创建，需提供 `ADMIN_BOOTSTRAP_TOKEN`；建成后该 Token 不会代替管理员登录凭据。
 6. 准备好 3X-UI 面板的 HTTPS 公网地址、用户名与密码或受限 API Token。Worker 无法访问私网/回环面板地址；面板凭据在 D1 中加密保存。管理员在界面新增节点并验证探测状态，再创建入站和套餐。
 
 ### Waffo
 
-依赖以下绑定；缺任意一项时下单会直接失败并提示 `Waffo requires WAFFO_API_KEY, WAFFO_SIGNING_KEY, WAFFO_PUBLIC_KEY, WAFFO_MERCHANT_ID, and PUBLIC_APP_URL.`：
+依赖以下系统设置（表中旧变量名对应上文 camelCase 字段，不再读取 Worker 绑定）；缺任意一项时下单会直接失败并提示 `Waffo requires WAFFO_API_KEY, WAFFO_SIGNING_KEY, WAFFO_PUBLIC_KEY, WAFFO_MERCHANT_ID, and PUBLIC_APP_URL.`：
 
 | 变量 | 含义与格式 |
 | --- | --- |
@@ -90,31 +84,11 @@ npm run preview
 | `PUBLIC_APP_URL` | 站点 HTTPS 源站，如 `https://3xui.example.com`；用于生成 `notifyUrl` 与成功/失败/取消跳转地址，必须是 `https:` 且与前端/API 同源。 |
 | `WAFFO_ENVIRONMENT` | 可省略。省略或非 `production` 值时请求 `https://api-sandbox.waffo.com`，设为 `production` 才请求 `https://api.waffo.com`。 |
 
-本地开发使用项目根目录下被 Git 忽略的 `.dev.vars`（`npm run dev` 会自动读取）：
+本地和生产都通过管理员 `PUT /api/admin/settings` 保存业务配置，不再读取同名环境变量，也不会自动导入旧环境变量。升级时请重新保存旧配置后验证业务，再清理已废弃的 Worker secrets。
 
-```ini
-WAFFO_API_KEY=<沙箱 API Key>
-WAFFO_MERCHANT_ID=<沙箱商户号>
-WAFFO_SIGNING_KEY="-----BEGIN PRIVATE KEY-----\n<base64 内容>\n-----END PRIVATE KEY-----"
-WAFFO_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n<base64 内容>\n-----END PUBLIC KEY-----"
-WAFFO_ENVIRONMENT=sandbox
-PUBLIC_APP_URL=https://<本地或预览 HTTPS 地址>
-```
+系统设置字段：`publicAppUrl`、`turnstileSiteKey`、`turnstileSecretKey`、`resendApiKey`、`resendFrom`、`waffoApiKey`、`waffoSigningKey`、`waffoPublicKey`、`waffoMerchantId`、`waffoEnvironment`（sandbox/production）。现有未开放支付适配器使用 `dodoApiKey`、`dodoWebhookKey`、`dodoEnvironment`（test_mode/live_mode）、`dodoTopupProductId`、`zpayPid`、`zpayKey`、`zpayPaymentType`（alipay/wxpay）。`publicAppUrl` 必须为不带路径、凭据、查询或片段的 HTTPS 源站。
 
-PEM 支持真实换行，也支持把换行写成 `\n`（密钥解析会还原），因此单行配置同样可用。私钥与公钥不可互换：`WAFFO_SIGNING_KEY` 只用于签名，`WAFFO_PUBLIC_KEY` 只用于验签。
-
-生产环境用 Secret 保存，不要把密钥写进 `wrangler.jsonc` 或提交记录：
-
-```bash
-npx wrangler secret put WAFFO_API_KEY
-npx wrangler secret put WAFFO_MERCHANT_ID
-npx wrangler secret put WAFFO_SIGNING_KEY
-npx wrangler secret put WAFFO_PUBLIC_KEY
-npx wrangler secret put PUBLIC_APP_URL
-npx wrangler secret list
-```
-
-`wrangler secret put` 会交互式读取内容；粘贴完整 PEM 后按 Ctrl-D（Windows 为 Ctrl-Z 回车）结束。也可在 bash/zsh 下用 `npx wrangler secret put WAFFO_SIGNING_KEY < waffo-private.pem` 直接从文件导入。`PUBLIC_APP_URL` 不是密钥，写在 `wrangler.jsonc` 的 `vars` 里同样生效，但需与 Secret 中的值保持一致。
+敏感字段 `turnstileSecretKey`、`resendApiKey`、`waffoApiKey`、`waffoSigningKey`、`dodoApiKey`、`dodoWebhookKey`、`zpayKey` 使用 APP_ENCRYPTION_KEY 加密后存储。`GET /api/admin/settings` 返回 `{ settings, secretConfigured }`，其中秘密字段始终为空字符串，状态为布尔值。PUT 使用平铺对象；省略或空字符串保持旧秘密，`null` 明确清除，非空字符串替换。所有字段校验和加密完成后才开始写入。普通字段空字符串清除。PEM 支持真实换行和字面 `\n`；私钥只用于签名，平台公钥只用于验签。
 
 配置完成后自检：
 
@@ -125,7 +99,7 @@ npx wrangler secret list
 
 交易行为说明：
 
-- 沙箱环境为默认值；将 Worker var `WAFFO_ENVIRONMENT` 设为 `production` 才会指向生产 API。上线前先在 Waffo 沙箱使用沙箱密钥完整验证订单创建、签名响应和 webhook。
+- 沙箱环境为默认值；将系统设置 `waffoEnvironment` 设为 `production` 才会指向生产 API。上线前先在 Waffo 沙箱使用沙箱密钥完整验证订单创建、签名响应和 webhook。
 - Waffo 商户后台通知地址必须配置为 `https://<PUBLIC_APP_URL>/api/webhooks/waffo`；应用会以 HTTPS `PUBLIC_APP_URL` 生成通知及跳转地址。
 - 付费升级的应付金额先由账户余额抵扣（升级抵扣按剩余有效期与剩余流量较低比例计算，公式不变），余额部分以 D1 流水 `balance_payment` 记账并在同一事务内扣减；余额不足时订单金额为差额，余额已抵扣部分记录在订单 `metadata.balanceAppliedMinor`，订单关闭或过期时以 `balance_refund` 幂等退回。
 - 支持的订单终态为 `PAY_SUCCESS` 和 `ORDER_CLOSE`；处理中状态确认接收但不结算。Webhook 投递可能乱序；若成功通知到达时本地订单已标记为失败或过期，应用会请求并验签 Waffo Order Inquiry，以返回的终态核对订单金额和币种后再结算，查询失败或仍未终态时返回失败回执供 Waffo 重试。重复关闭通知对已失败/过期订单幂等确认。

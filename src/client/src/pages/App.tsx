@@ -65,7 +65,7 @@ type UserOverviewData = {
   nodes: Array<{ id: string; name: string; region: string; publicAddress: string; status: string; inboundCount: number }>;
   balanceMinor: number;
   capabilities: { trafficMetering: boolean; quotaEnforcement: boolean; atomicPaymentSettlement: boolean };
-  attendance: { streak: number; lastCheckinAt: string | null; checkedInToday: boolean; rewardBytes: number };
+  attendance: { streak: number; lastCheckinAt: string | null; checkedInToday: boolean; rewardBytes: number; minRewardBytes?: number; maxRewardBytes?: number };
 };
 type UserNodeData = { node: UserOverviewData["nodes"][number]; inbound: { id: string; name: string; multiplier: number; protocol: string; port: number }; client: { email: string; clientId: string; enabled: boolean; syncStatus: string } | null };
 type DisplayNode = { id?: string; name: string; region: string; address?: string; flag: string; multiplier: string; latency: string; load: number | null; color: string; state: string; enabled?: boolean; inbounds?: number; checkedAt?: string };
@@ -345,6 +345,16 @@ function App() {
       .catch((error: unknown) => setSecurityConfigError(error instanceof Error ? error.message : "Unable to load security settings."))
       .finally(() => setSecurityConfigLoaded(true));
   }, []);
+  const refreshPublicConfig = async () => {
+    try {
+      setPublicConfig(await apiRequest<PublicConfig>("/api/auth/config"));
+      setSecurityConfigError("");
+    } catch (cause) {
+      setPublicConfig(null);
+      setSecurityConfigError(cause instanceof Error ? cause.message : "Unable to load security settings.");
+      throw cause;
+    }
+  };
   const onAuthenticated = (user: AuthenticatedUser) => { setAuthError(""); setSessionUser(user); };
   const logout = async () => {
     try { await apiRequest("/api/auth/logout", { method: "POST" }); } catch { /* Session state is cleared locally even if the API is unreachable. */ }
@@ -352,7 +362,7 @@ function App() {
   };
   if (loading) return <main className={`auth-shell ${detectTheme()}`}><section className="auth-card"><div className="brand-mark"><span /><span /><span /></div><h1>3XUI Manager</h1><p className="auth-intro">Checking your session…</p></section></main>;
   if (!sessionUser) return <AuthScreen onAuthenticated={onAuthenticated} initialError={authError} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} turnstileRequired={publicConfig?.registrationTurnstileEnabled ?? false} securityConfigLoaded={securityConfigLoaded} securityConfigError={securityConfigError} />;
-  return <DashboardApp sessionUser={sessionUser} publicConfig={publicConfig} onLogout={() => { void logout(); }} />;
+  return <DashboardApp sessionUser={sessionUser} publicConfig={publicConfig} onSettingsSaved={refreshPublicConfig} onLogout={() => { void logout(); }} />;
 }
 
 type Theme = "dark" | "light";
@@ -375,7 +385,7 @@ function rememberTheme(theme: Theme) {
   try { window.localStorage.setItem(THEME_STORAGE_KEY, theme); } catch { /* Theme preference is optional. */ }
 }
 
-function DashboardApp({ sessionUser, publicConfig, onLogout }: { sessionUser: AuthenticatedUser; publicConfig: PublicConfig | null; onLogout: () => void }) {
+function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: { sessionUser: AuthenticatedUser; publicConfig: PublicConfig | null; onSettingsSaved: () => Promise<void>; onLogout: () => void }) {
   const [locale, setLocale] = useState<Locale>(() => detectLocale());
   const [page, setPage] = useState<PageKey>("overview");
   const [admin, setAdmin] = useState(sessionUser.role === "admin");
@@ -816,7 +826,7 @@ function DashboardApp({ sessionUser, publicConfig, onLogout }: { sessionUser: Au
           {page === "subscription" && <SubscriptionPage t={t} locale={locale} subscription={subscription} onCopy={copyLink} />}
           {page === "account" && <AccountPage t={t} locale={locale} user={sessionUser} overview={overview} rows={orderDisplayRows} onNavigate={setPage} />}
           {page === "checkin" && <CheckinPage t={t} locale={locale} attendance={overview?.attendance ?? null} available={Boolean(overview?.capabilities.trafficMetering)} securityConfigAvailable={publicConfig !== null} turnstileRequired={Boolean(publicConfig?.checkinTurnstileEnabled)} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} busy={checkinBusy} onCheckin={(token) => { void submitCheckin(token); }} />}
-          {page === "system" && <SystemPage t={t} locale={locale} publicConfig={publicConfig} theme={theme} accent={accent} onTheme={chooseTheme} onAccent={setAccent} onLocale={changeLocale} onAction={(label) => flash(label)} />}
+          {page === "system" && <SystemPage t={t} locale={locale} onSaved={async () => { setRefreshToken((value) => value + 1); await onSettingsSaved(); }} theme={theme} accent={accent} onTheme={chooseTheme} onAccent={setAccent} onLocale={changeLocale} onAction={(label) => flash(label)} />}
           <footer className="page-footer"><span>© 2025 3XUI Manager</span><span><i /> {t("apiStatus")} <b>·</b> {admin ? t("d1Mode") : t("planName")}</span></footer>
         </section>
       </main>
@@ -1320,18 +1330,18 @@ function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, o
         fr: `Pointé aujourd'hui · série de ${overview.attendance.streak} jours`,
       })
       : pick(locale, {
-        zh: `今日待签到 · 奖励 ${formatBytes(overview.attendance.rewardBytes)}`,
-        en: `Check in today · ${formatBytes(overview.attendance.rewardBytes)} reward`,
-        "zh-TW": `今日待簽到 · 獎勵 ${formatBytes(overview.attendance.rewardBytes)}`,
-        ja: `本日は未チェックイン · 特典 ${formatBytes(overview.attendance.rewardBytes)}`,
-        ko: `오늘 체크인 필요 · 보상 ${formatBytes(overview.attendance.rewardBytes)}`,
-        de: `Heute einchecken · Belohnung ${formatBytes(overview.attendance.rewardBytes)}`,
-        es: `Regístrate hoy · recompensa de ${formatBytes(overview.attendance.rewardBytes)}`,
-        pt: `Faça check-in hoje · recompensa de ${formatBytes(overview.attendance.rewardBytes)}`,
-        it: `Fai check-in oggi · premio ${formatBytes(overview.attendance.rewardBytes)}`,
-        ar: `سجل الحضور اليوم · مكافأة ${formatBytes(overview.attendance.rewardBytes)}`,
-        ru: `Отметьтесь сегодня · награда ${formatBytes(overview.attendance.rewardBytes)}`,
-        fr: `Pointez aujourd'hui · récompense ${formatBytes(overview.attendance.rewardBytes)}`,
+        zh: `今日待签到 · 奖励 ${attendanceRewardLabel(overview.attendance)}`,
+        en: `Check in today · ${attendanceRewardLabel(overview.attendance)} reward`,
+        "zh-TW": `今日待簽到 · 獎勵 ${attendanceRewardLabel(overview.attendance)}`,
+        ja: `本日は未チェックイン · 特典 ${attendanceRewardLabel(overview.attendance)}`,
+        ko: `오늘 체크인 필요 · 보상 ${attendanceRewardLabel(overview.attendance)}`,
+        de: `Heute einchecken · Belohnung ${attendanceRewardLabel(overview.attendance)}`,
+        es: `Regístrate hoy · recompensa de ${attendanceRewardLabel(overview.attendance)}`,
+        pt: `Faça check-in hoje · recompensa de ${attendanceRewardLabel(overview.attendance)}`,
+        it: `Fai check-in oggi · premio ${attendanceRewardLabel(overview.attendance)}`,
+        ar: `سجل الحضور اليوم · مكافأة ${attendanceRewardLabel(overview.attendance)}`,
+        ru: `Отметьтесь сегодня · награда ${attendanceRewardLabel(overview.attendance)}`,
+        fr: `Pointez aujourd'hui · récompense ${attendanceRewardLabel(overview.attendance)}`,
       });
   const hero = heroTitle(locale, "user");
   return <>
@@ -1542,9 +1552,12 @@ function CheckinPage({ t, locale, attendance, available, securityConfigAvailable
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const checkedIn = attendance?.checkedInToday ?? false;
+  const rewardsEnabled = (attendance?.maxRewardBytes ?? attendance?.rewardBytes ?? 0) > 0;
   const widgetReady = !turnstileRequired || Boolean(turnstileSiteKey && turnstileToken);
   const unavailableMessage = !securityConfigAvailable
     ? say(locale, "安全设置暂不可用，请稍后重试签到。", "Security settings are unavailable; retry check-in later.")
+    : !rewardsEnabled
+      ? say(locale, "签到奖励暂未开放。", "Check-in rewards are currently disabled.")
     : !available
       ? say(locale, "当前存储模式不支持安全签到；需要启用 D1 原子存储。", "Secure check-in is unavailable with this storage mode; D1 atomic storage is required.")
       : turnstileRequired && !turnstileSiteKey
@@ -1555,19 +1568,19 @@ function CheckinPage({ t, locale, attendance, available, securityConfigAvailable
             ? say(locale, "今日已签到，奖励已计入流量额度。", "You have checked in today; the reward is included in your traffic quota.")
             : say(locale, "完成今日签到后，奖励将计入流量额度。", "Check in today to add the reward to your traffic quota.");
   return <div className="checkin-layout"><section className="panel checkin-hero"><span className="checkin-spark">✦</span><span className="section-kicker">{t("attendance")}</span><h2>{t("checkin")}</h2><p>{pick(locale, {
-  zh: `今日奖励 ${formatBytes(attendance?.rewardBytes ?? 0)}，连续签到 ${attendance?.streak ?? 0} 天。`,
-  en: `${formatBytes(attendance?.rewardBytes ?? 0)} reward today · ${attendance?.streak ?? 0} day streak.`,
-  "zh-TW": `今日獎勵 ${formatBytes(attendance?.rewardBytes ?? 0)}，連續簽到 ${attendance?.streak ?? 0} 天。`,
-  ja: `本日の特典 ${formatBytes(attendance?.rewardBytes ?? 0)} · 連続${attendance?.streak ?? 0}日。`,
-  ko: `오늘 보상 ${formatBytes(attendance?.rewardBytes ?? 0)} · ${attendance?.streak ?? 0}일 연속.`,
-  de: `Heute ${formatBytes(attendance?.rewardBytes ?? 0)} Belohnung · ${attendance?.streak ?? 0} Tage Serie.`,
-  es: `Recompensa de hoy: ${formatBytes(attendance?.rewardBytes ?? 0)} · racha de ${attendance?.streak ?? 0} días.`,
-  pt: `Recompensa de hoje: ${formatBytes(attendance?.rewardBytes ?? 0)} · sequência de ${attendance?.streak ?? 0} dias.`,
-  it: `Premio di oggi: ${formatBytes(attendance?.rewardBytes ?? 0)} · serie di ${attendance?.streak ?? 0} giorni.`,
-  ar: `مكافأة اليوم ${formatBytes(attendance?.rewardBytes ?? 0)} · ${attendance?.streak ?? 0} يوم متتابع.`,
-  ru: `Награда сегодня ${formatBytes(attendance?.rewardBytes ?? 0)} · серия ${attendance?.streak ?? 0} дн.`,
-  fr: `Récompense du jour : ${formatBytes(attendance?.rewardBytes ?? 0)} · série de ${attendance?.streak ?? 0} jours.`,
-})}</p><div className="auth-message" role="status">{unavailableMessage}</div>{turnstileRequired && turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} action="checkin" resetKey={turnstileResetKey} onToken={setTurnstileToken} locale={locale} />}<button className="primary-button" type="button" disabled={!available || !securityConfigAvailable || !widgetReady || busy || checkedIn} onClick={() => { onCheckin(turnstileRequired ? turnstileToken : undefined); if (turnstileRequired) { setTurnstileToken(""); setTurnstileResetKey((value) => value + 1); } }}><Zap size={15} />{busy ? say(locale, "正在签到…", "Checking in…") : checkedIn ? say(locale, "今日已签到", "Checked in today") : !available || !securityConfigAvailable ? say(locale, "暂不可用", "Unavailable") : turnstileRequired && !widgetReady ? say(locale, "完成人机验证", "Verify to continue") : say(locale, "立即签到", "Check in now")}</button></section><section className="panel checkin-side"><div className="section-kicker">{t("attendance")}</div><h3>{say(locale, "签到记录", "Attendance")}</h3><p>{pick(locale, {
+  zh: `今日奖励 ${attendanceRewardLabel(attendance)}，连续签到 ${attendance?.streak ?? 0} 天。`,
+  en: `${attendanceRewardLabel(attendance)} reward today · ${attendance?.streak ?? 0} day streak.`,
+  "zh-TW": `今日獎勵 ${attendanceRewardLabel(attendance)}，連續簽到 ${attendance?.streak ?? 0} 天。`,
+  ja: `本日の特典 ${attendanceRewardLabel(attendance)} · 連続${attendance?.streak ?? 0}日。`,
+  ko: `오늘 보상 ${attendanceRewardLabel(attendance)} · ${attendance?.streak ?? 0}일 연속.`,
+  de: `Heute ${attendanceRewardLabel(attendance)} Belohnung · ${attendance?.streak ?? 0} Tage Serie.`,
+  es: `Recompensa de hoy: ${attendanceRewardLabel(attendance)} · racha de ${attendance?.streak ?? 0} días.`,
+  pt: `Recompensa de hoje: ${attendanceRewardLabel(attendance)} · sequência de ${attendance?.streak ?? 0} dias.`,
+  it: `Premio di oggi: ${attendanceRewardLabel(attendance)} · serie di ${attendance?.streak ?? 0} giorni.`,
+  ar: `مكافأة اليوم ${attendanceRewardLabel(attendance)} · ${attendance?.streak ?? 0} يوم متتابع.`,
+  ru: `Награда сегодня ${attendanceRewardLabel(attendance)} · серия ${attendance?.streak ?? 0} дн.`,
+  fr: `Récompense du jour : ${attendanceRewardLabel(attendance)} · série de ${attendance?.streak ?? 0} jours.`,
+})}</p><div className="auth-message" role="status">{unavailableMessage}</div>{turnstileRequired && turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} action="checkin" resetKey={turnstileResetKey} onToken={setTurnstileToken} locale={locale} />}<button className="primary-button" type="button" disabled={!rewardsEnabled || !available || !securityConfigAvailable || !widgetReady || busy || checkedIn} onClick={() => { onCheckin(turnstileRequired ? turnstileToken : undefined); if (turnstileRequired) { setTurnstileToken(""); setTurnstileResetKey((value) => value + 1); } }}><Zap size={15} />{busy ? say(locale, "正在签到…", "Checking in…") : checkedIn ? say(locale, "今日已签到", "Checked in today") : !rewardsEnabled || !available || !securityConfigAvailable ? say(locale, "暂不可用", "Unavailable") : turnstileRequired && !widgetReady ? say(locale, "完成人机验证", "Verify to continue") : say(locale, "立即签到", "Check in now")}</button></section><section className="panel checkin-side"><div className="section-kicker">{t("attendance")}</div><h3>{say(locale, "签到记录", "Attendance")}</h3><p>{pick(locale, {
   zh: `连续签到 ${attendance?.streak ?? 0} 天`,
   en: `${attendance?.streak ?? 0} consecutive days`,
   "zh-TW": `連續簽到 ${attendance?.streak ?? 0} 天`,
@@ -1580,10 +1593,16 @@ function CheckinPage({ t, locale, attendance, available, securityConfigAvailable
   ar: `${attendance?.streak ?? 0} يوم متتابع`,
   ru: `${attendance?.streak ?? 0} дней подряд`,
   fr: `${attendance?.streak ?? 0} jours consécutifs`,
-})}</p><div className="setting-row"><div><b>{say(locale, "今日状态", "Today's status")}</b><small>{attendance?.lastCheckinAt ? formatDate(attendance.lastCheckinAt, locale) : say(locale, "暂无签到记录", "No check-ins recorded")}</small></div><span className={`status-chip ${checkedIn ? "" : "pending"}`}><i />{checkedIn ? say(locale, "已完成", "Complete") : say(locale, "未签到", "Not checked in")}</span></div><div className="setting-row"><div><b>{say(locale, "本次奖励", "Today's reward")}</b><small>{say(locale, "增加流量额度", "Added to traffic quota")}</small></div><strong>{formatBytes(attendance?.rewardBytes ?? 0)}</strong></div></section></div>;
+})}</p><div className="setting-row"><div><b>{say(locale, "今日状态", "Today's status")}</b><small>{attendance?.lastCheckinAt ? formatDate(attendance.lastCheckinAt, locale) : say(locale, "暂无签到记录", "No check-ins recorded")}</small></div><span className={`status-chip ${checkedIn ? "" : "pending"}`}><i />{checkedIn ? say(locale, "已完成", "Complete") : say(locale, "未签到", "Not checked in")}</span></div><div className="setting-row"><div><b>{say(locale, "本次奖励", "Today's reward")}</b><small>{say(locale, "增加流量额度", "Added to traffic quota")}</small></div><strong>{attendanceRewardLabel(attendance)}</strong></div></section></div>;
 }
 
-type SettingsTabKey = "platform" | "security" | "referrals" | "attendance" | "emails" | "display";
+function attendanceRewardLabel(attendance: UserOverviewData["attendance"] | null): string {
+  const min = attendance?.minRewardBytes ?? attendance?.rewardBytes ?? 0;
+  const max = attendance?.maxRewardBytes ?? attendance?.rewardBytes ?? 0;
+  return min === max ? formatBytes(min) : `${formatBytes(min)} – ${formatBytes(max)}`;
+}
+
+type SettingsTabKey = "platform" | "security" | "referrals" | "attendance" | "emails" | "payment" | "display";
 
 const settingsTabs: Array<[SettingsTabKey, MessageKey, LucideIcon]> = [
   ["platform", "settingsTitle", Settings2],
@@ -1591,6 +1610,7 @@ const settingsTabs: Array<[SettingsTabKey, MessageKey, LucideIcon]> = [
   ["referrals", "referrals", Users],
   ["attendance", "attendance", Zap],
   ["emails", "emails", Bell],
+  ["payment", "payment", CreditCard],
   ["display", "display", Palette],
 ];
 
@@ -1615,7 +1635,11 @@ function settingsDraft(settings: Record<string, unknown>): Record<string, string
     userInviteLimit: number("userInviteLimit", 0),
     referralPercent: number("referralPercent", 0),
     referralValidityDays: number("referralValidityDays", 30),
-    checkinRewardGb: String(Number((reward / 1_000_000_000).toFixed(3))),
+    checkinMinRewardGb: String(Number(number("checkinMinTrafficBytes", reward)) / 1_000_000_000),
+    checkinMaxRewardGb: String(Number(number("checkinMaxTrafficBytes", reward)) / 1_000_000_000),
+    ...Object.fromEntries(["publicAppUrl", "turnstileSiteKey", "resendFrom", "waffoMerchantId", "waffoPublicKey"].map((key) => [key, typeof settings[key] === "string" ? settings[key] : ""])),
+    waffoEnvironment: settings.waffoEnvironment === "production" ? "production" : "sandbox",
+    turnstileSecretKey: "", resendApiKey: "", waffoApiKey: "", waffoSigningKey: "",
     notifyTrafficExhausted: flag("notifyTrafficExhausted", true),
     notifySubscriptionExpired: flag("notifySubscriptionExpired", true),
     notifyTrafficReset: flag("notifyTrafficReset", false),
@@ -1631,24 +1655,27 @@ function settingsTabHint(tab: SettingsTabKey, locale: Locale): string {
   if (tab === "security") return say(locale, "人机验证与登录安全策略。", "Human verification and login security.");
   if (tab === "referrals") return say(locale, "邀请码与返利比例。", "Invite codes and referral commission.");
   if (tab === "attendance") return say(locale, "每日签到奖励的流量额度。", "Traffic granted by the daily check-in.");
-  if (tab === "emails") return say(locale, "哪些事件会发送邮件通知。", "Which events send email notifications.");
+  if (tab === "emails") return say(locale, "Resend 发信配置与邮件通知。", "Resend delivery settings and email notifications.");
+  if (tab === "payment") return say(locale, "Waffo 支付配置。", "Waffo payment settings.");
   return say(locale, "主题、强调色与界面语言。", "Theme, accent color and interface language.");
 }
 
-function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent, onLocale, onAction }: {
-  t: TextFn; locale: Locale; publicConfig: PublicConfig | null; theme: Theme; accent: string;
+function SystemPage({ t, locale, onSaved, theme, accent, onTheme, onAccent, onLocale, onAction }: {
+  t: TextFn; locale: Locale; onSaved: () => Promise<void>; theme: Theme; accent: string;
   onTheme: (next: Theme) => void; onAccent: (next: string) => void; onLocale: (next: Locale) => void;
   onAction: (label: string) => void;
 }) {
   const [tab, setTab] = useState<SettingsTabKey>("platform");
   const [draft, setDraft] = useState<Record<string, string | boolean> | null>(null);
+  const [secretConfigured, setSecretConfigured] = useState<Record<string, boolean>>({});
+  const [clearSecrets, setClearSecrets] = useState<Record<string, boolean>>({});
   const [health, setHealth] = useState<{ capabilities?: { trafficMetering?: boolean } } | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let active = true;
-    void apiRequest<{ settings: Record<string, unknown> }>("/api/admin/settings")
-      .then((result) => { if (active) setDraft(settingsDraft(result.settings)); })
+    void apiRequest<{ settings: Record<string, unknown>; secretConfigured: Record<string, boolean> }>("/api/admin/settings")
+      .then((result) => { if (active) { setDraft(settingsDraft(result.settings)); setSecretConfigured(result.secretConfigured ?? {}); } })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Failed to load settings."); });
     void apiRequest<{ capabilities?: { trafficMetering?: boolean } }>("/api/health")
       .then((result) => { if (active) setHealth(result); })
@@ -1673,13 +1700,21 @@ function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent,
     setError("");
     try {
       const payload: Record<string, unknown> = {};
+      const text = (key: string) => { payload[key] = String(draft[key] ?? "").trim(); };
+      const secret = (key: string) => {
+        if (clearSecrets[key]) payload[key] = null;
+        else if (String(draft[key] ?? "").trim()) text(key);
+      };
       if (tab === "platform") {
         const balance = parseMoneyInput(String(draft.defaultBalance ?? ""), "USD");
         if (balance === null) throw new Error(say(locale, "初始余额格式不正确。", "The starting balance is not a valid amount."));
+        text("publicAppUrl");
         const timezone = String(draft.timezone ?? "").trim();
         if (!timezone) throw new Error(say(locale, "请填写时区名称。", "Enter a time zone name."));
         Object.assign(payload, { registrationEnabled: isOn("registrationEnabled"), inviteRequired: isOn("inviteRequired"), emailVerificationRequired: isOn("emailVerificationRequired"), defaultBalanceMinor: balance, timezone });
       } else if (tab === "security") {
+        text("turnstileSiteKey");
+        secret("turnstileSecretKey");
         Object.assign(payload, { turnstileEnabled: isOn("turnstileEnabled"), turnstileOnCheckin: isOn("turnstileOnCheckin") });
       } else if (tab === "referrals") {
         Object.assign(payload, {
@@ -1687,15 +1722,27 @@ function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent,
           referralPercent: decimalNumber("referralPercent", 0, 100), referralValidityDays: wholeNumber("referralValidityDays", 0, 3650),
         });
       } else if (tab === "attendance") {
-        Object.assign(payload, { checkinTrafficBytes: Math.round(decimalNumber("checkinRewardGb", 0, 1000) * 1_000_000_000) });
+        const min = decimalNumber("checkinMinRewardGb", 0, 1000);
+        const max = decimalNumber("checkinMaxRewardGb", 0, 1000);
+        if (min > max) throw new Error(say(locale, "奖励下限不能大于上限。", "The minimum reward cannot exceed the maximum."));
+        Object.assign(payload, { checkinMinTrafficBytes: Math.round(min * 1_000_000_000), checkinMaxTrafficBytes: Math.round(max * 1_000_000_000) });
+      } else if (tab === "payment") {
+        for (const key of ["waffoMerchantId", "waffoPublicKey", "waffoEnvironment"]) text(key);
+        secret("waffoApiKey");
+        secret("waffoSigningKey");
       } else if (tab === "emails") {
+        text("resendFrom");
+        secret("resendApiKey");
         for (const key of ["notifyTrafficExhausted", "notifySubscriptionExpired", "notifyTrafficReset", "notifyOrderExpired", "notifyReferralReward", "notifyAccountCleanup"]) payload[key] = isOn(key);
       }
       if (Object.keys(payload).length) {
         await apiRequest("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       }
-      const result = await apiRequest<{ settings: Record<string, unknown> }>("/api/admin/settings");
+      const result = await apiRequest<{ settings: Record<string, unknown>; secretConfigured: Record<string, boolean> }>("/api/admin/settings");
       setDraft(settingsDraft(result.settings));
+      setSecretConfigured(result.secretConfigured ?? {});
+      setClearSecrets({});
+      await onSaved();
       onAction(t("saveSuccess"));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : say(locale, "保存失败。", "Saving failed."));
@@ -1713,6 +1760,13 @@ function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent,
       <input type={options.type ?? "text"} inputMode={options.type === "number" ? "decimal" : undefined} value={String(draft?.[key] ?? "")} min={options.min} max={options.max} step={options.step} disabled={!draft || saving} aria-label={title} onChange={(event) => setValue(key, event.target.value)} />
       {options.suffix && <span>{options.suffix}</span>}
     </label>);
+  const pemInput = (key: string, title: string, disabled = false) => <textarea className="settings-select" rows={4} style={{ width: "100%", maxWidth: "100%", resize: "vertical" }} aria-label={title} autoComplete="off" spellCheck={false} value={String(draft?.[key] ?? "")} disabled={!draft || saving || disabled} onChange={(event) => setValue(key, event.target.value)} />;
+  const secretRow = (key: string, title: string, pem = false) => row(key, title,
+    clearSecrets[key] ? say(locale, "保存后清除密钥。", "The key will be cleared on save.") : secretConfigured[key] ? say(locale, "已配置；留空保留原密钥，输入新值替换。", "Configured; leave blank to keep the key, or enter a replacement.") : say(locale, "尚未配置。", "Not configured."),
+    <div style={{ display: "grid", gap: 8, width: "min(100%, 360px)" }}>
+      {pem ? pemInput(key, title, clearSecrets[key]) : <label className="settings-input"><input type="password" aria-label={title} autoComplete="new-password" value={String(draft?.[key] ?? "")} disabled={!draft || saving || clearSecrets[key]} onChange={(event) => setValue(key, event.target.value)} /></label>}
+      <button className="outline-button small" type="button" disabled={!draft || saving || (!secretConfigured[key] && !clearSecrets[key])} onClick={() => { setClearSecrets((current) => ({ ...current, [key]: !current[key] })); setValue(key, ""); }}>{clearSecrets[key] ? say(locale, "取消清除", "Keep existing key") : say(locale, "清除密钥", "Clear key")}</button>
+    </div>);
   const tabLabel = t((settingsTabs.find(([key]) => key === tab) ?? settingsTabs[0])[1]);
   return <div className="settings-layout"><aside className="panel settings-menu">{settingsTabs.map(([key, label, Icon]) => <button key={key} type="button" className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => setTab(key)}><Icon size={16} />{t(label)}<ChevronRight size={14} /></button>)}</aside><section className="panel settings-content">
     <div className="settings-section">
@@ -1722,6 +1776,7 @@ function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent,
       {!draft && !error && <div className="auth-message" role="status">{say(locale, "正在加载设置…", "Loading settings…")}</div>}
       {error && <div className="auth-message error" role="alert">{error}</div>}
       {draft && tab === "platform" && <>
+        {inputRow("publicAppUrl", say(locale, "站点公开地址", "Public site URL"), say(locale, "用于验证邮件、支付回调与跳转，例如 https://example.com。", "Used for verification emails, payment callbacks and redirects, e.g. https://example.com."), { type: "url" })}
         {row("storage", t("storageMode"), `${t("d1Mode")} · ${health?.capabilities?.trafficMetering ? t("active") : t("offline")}`, <span className={`status-chip ${health?.capabilities?.trafficMetering ? "" : "pending"}`}><i />{health?.capabilities?.trafficMetering ? t("active") : t("offline")}</span>)}
         {toggleRow("registrationEnabled", say(locale, "开放注册", "Open registration"), say(locale, "关闭后注册接口返回 403。", "When off, sign-up returns 403."))}
         {toggleRow("inviteRequired", say(locale, "注册需要邀请码", "Invite code required"), say(locale, "新用户必须携带有效邀请码才能注册。", "New accounts must present a valid invite code."))}
@@ -1730,10 +1785,11 @@ function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent,
         {inputRow("timezone", say(locale, "签到时区", "Check-in time zone"), say(locale, "IANA 名称，例如 Asia/Shanghai。", "IANA name, e.g. Asia/Shanghai."))}
       </>}
       {draft && tab === "security" && <>
-        {row("siteKey", say(locale, "Turnstile Site Key", "Turnstile site key"), publicConfig?.turnstileSiteKey ?? say(locale, "未配置，需要设置 TURNSTILE_SITE_KEY。", "Not configured; set TURNSTILE_SITE_KEY."), <span className={`status-chip ${publicConfig?.turnstileSiteKey ? "" : "pending"}`}><i />{publicConfig?.turnstileSiteKey ? say(locale, "已配置", "Configured") : say(locale, "缺失", "Missing")}</span>)}
+        {inputRow("turnstileSiteKey", "Turnstile Site Key", say(locale, "Cloudflare Turnstile 的公开站点密钥。", "The public site key from Cloudflare Turnstile."))}
+        {secretRow("turnstileSecretKey", "Turnstile Secret Key")}
         {toggleRow("turnstileEnabled", say(locale, "注册要求人机验证", "Verify sign-ups"), say(locale, "注册时强制通过 Turnstile 校验。", "Require Turnstile on registration."))}
         {toggleRow("turnstileOnCheckin", say(locale, "签到要求人机验证", "Verify check-ins"), say(locale, "签到请求必须携带有效校验令牌。", "Check-in requests must carry a valid token."))}
-        <p className="settings-note">{say(locale, "Turnstile 密钥通过 wrangler secret 配置，不在此页面保存。", "Turnstile keys are configured with wrangler secret and are never stored here.")}</p>
+        <p className="settings-note">{say(locale, "密钥加密保存，页面不会回显已有密钥。", "Secrets are stored encrypted and existing keys are never displayed.")}</p>
       </>}
       {draft && tab === "referrals" && <>
         {toggleRow("userInvitesEnabled", say(locale, "允许用户生成邀请码", "Users can create invite codes"), say(locale, "关闭后只有管理员可以创建邀请码。", "When off, only admins can create invite codes."))}
@@ -1742,17 +1798,27 @@ function SystemPage({ t, locale, publicConfig, theme, accent, onTheme, onAccent,
         {inputRow("referralValidityDays", say(locale, "返利有效期", "Referral validity"), say(locale, "超过该天数的订单不再返利。", "Orders placed after this window earn no commission."), { type: "number", min: 0, max: 3650, step: "1", suffix: say(locale, "天", "days") })}
       </>}
       {draft && tab === "attendance" && <>
-        {inputRow("checkinRewardGb", say(locale, "每日签到奖励", "Daily check-in reward"), say(locale, "签到后追加到本期流量额度。", "Added to the current traffic quota after check-in."), { type: "number", min: 0, max: 1000, step: "0.01", suffix: "GB" })}
-        {row("rewardPreview", say(locale, "折算字节", "In bytes"), say(locale, "按本项目十进制 GB 换算。", "Converted with decimal GB."), <strong className="settings-value">{formatBytes(Number(String(draft.checkinRewardGb ?? "0")) * 1_000_000_000)}</strong>)}
+        {inputRow("checkinMinRewardGb", say(locale, "签到奖励下限", "Minimum check-in reward"), say(locale, "可为 0；每次签到在上下限间随机奖励。", "May be 0; each check-in grants a random reward within the range."), { type: "number", min: 0, max: 1000, step: "0.000000001", suffix: "GB" })}
+        {inputRow("checkinMaxRewardGb", say(locale, "签到奖励上限", "Maximum check-in reward"), say(locale, "上限为 0 时关闭签到；上下限相同时奖励固定。", "Set to 0 to disable check-in; equal bounds grant a fixed reward."), { type: "number", min: 0, max: 1000, step: "0.000000001", suffix: "GB" })}
+        <p className="settings-note">{say(locale, "使用十进制 GB：1 GB = 1,000,000,000 字节。", "Decimal GB: 1 GB = 1,000,000,000 bytes.")}</p>
+      </>}
+      {draft && tab === "payment" && <>
+        {inputRow("waffoMerchantId", "Waffo Merchant ID", say(locale, "Waffo 商户编号。", "Your Waffo merchant identifier."))}
+        {row("waffoEnvironment", say(locale, "支付环境", "Payment environment"), say(locale, "测试使用 Sandbox，正式收款使用 Production。", "Use Sandbox for testing and Production for live payments."), <select className="settings-select" aria-label={say(locale, "支付环境", "Payment environment")} value={String(draft.waffoEnvironment)} disabled={saving} onChange={(event) => setValue("waffoEnvironment", event.target.value)}><option value="sandbox">Sandbox</option><option value="production">Production</option></select>)}
+        {secretRow("waffoApiKey", "Waffo API Key")}
+        {secretRow("waffoSigningKey", say(locale, "Waffo 签名私钥 (PEM)", "Waffo signing private key (PEM)"), true)}
+        {row("waffoPublicKey", say(locale, "Waffo 验签公钥 (PEM)", "Waffo verification public key (PEM)"), say(locale, "用于验证支付回调签名。", "Used to verify payment webhook signatures."), pemInput("waffoPublicKey", "Waffo public key"))}
       </>}
       {draft && tab === "emails" && <>
+        {inputRow("resendFrom", say(locale, "Resend 发件人", "Resend sender"), say(locale, "使用已验证域名，例如 Service <mail@example.com>。", "Use a verified domain, e.g. Service <mail@example.com>."))}
+        {secretRow("resendApiKey", "Resend API Key")}
         {toggleRow("notifyTrafficExhausted", say(locale, "流量用尽", "Traffic exhausted"), say(locale, "用户流量耗尽时发送提醒。", "Email the user when their traffic runs out."))}
         {toggleRow("notifySubscriptionExpired", say(locale, "订阅到期", "Subscription expired"), say(locale, "套餐到期后发送提醒。", "Email the user after their plan expires."))}
         {toggleRow("notifyTrafficReset", say(locale, "流量重置", "Traffic reset"), say(locale, "周期流量重置时发送提醒。", "Email the user when their traffic resets."))}
         {toggleRow("notifyOrderExpired", say(locale, "订单过期", "Order expired"), say(locale, "未支付的订单超时后发送提醒。", "Email the user when an unpaid order expires."))}
         {toggleRow("notifyReferralReward", say(locale, "返利到账", "Referral reward"), say(locale, "邀请返利入账时通知邀请人。", "Notify the inviter when a commission is credited."))}
         {toggleRow("notifyAccountCleanup", say(locale, "账户清理", "Account cleanup"), say(locale, "长期未活跃账户被清理前提醒。", "Warn before inactive accounts are removed."))}
-        <p className="settings-note">{say(locale, "邮件需要配置 RESEND_API_KEY 与 RESEND_FROM 才会真正发出。", "Emails are only delivered once RESEND_API_KEY and RESEND_FROM are set.")}</p>
+        <p className="settings-note">{say(locale, "邮件需要配置 Resend API Key 与发件人才能发出。", "Email delivery requires a Resend API key and sender.")}</p>
       </>}
       {tab === "display" && <>
         {row("theme", t("theme"), say(locale, "切换浅色或深色外观。", "Switch between light and dark."), <div className="segmented"><button type="button" className={theme === "light" ? "active" : ""} onClick={() => onTheme("light")}>{t("light")}</button><button type="button" className={theme === "dark" ? "active" : ""} onClick={() => onTheme("dark")}>{t("dark")}</button></div>)}

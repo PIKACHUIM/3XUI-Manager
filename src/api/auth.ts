@@ -32,7 +32,7 @@ auth.get("/config", async (c) => {
     readSetting<boolean>(store, "turnstileOnCheckin", false),
   ]);
   return c.json({
-    turnstileSiteKey: c.env.TURNSTILE_SITE_KEY?.trim() || null,
+    turnstileSiteKey: (await readSetting<string>(store, "turnstileSiteKey", "")).trim() || null,
     registrationTurnstileEnabled,
     checkinTurnstileEnabled,
   });
@@ -120,7 +120,7 @@ auth.post("/register", async (c) => {
   const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode.trim() : "";
   if (!emailPattern.test(email) || email.length > 254) return c.json({ error: "Enter a valid email address." }, 422);
   if (password.length < 12 || password.length > 256) return c.json({ error: "Password must contain 12 to 256 characters." }, 422);
-  const registrationEnabled = await readSetting<boolean>(store, "registrationEnabled", String(c.env.REGISTRATION_ENABLED ?? "true") === "true");
+  const registrationEnabled = await readSetting<boolean>(store, "registrationEnabled", true);
   if (!registrationEnabled) return c.json({ error: "Registration is currently closed." }, 403);
   const turnstileEnabled = await readSetting<boolean>(store, "turnstileEnabled", false);
   if (turnstileEnabled && !(await verifyTurnstile(c.env, typeof body.turnstileToken === "string" ? body.turnstileToken : undefined, "signup", new URL(c.req.url).hostname, c.req.header("cf-connecting-ip")))) {
@@ -142,7 +142,7 @@ auth.post("/register", async (c) => {
     const raw = randomToken();
     const tokenHash = await sha256(raw);
     await store.put("email-verification", tokenHash, { userId: user.id, expiresAt: expiryAfter(60 * 60), createdAt: new Date().toISOString() });
-    const base = c.env.PUBLIC_APP_URL ?? new URL(c.req.url).origin;
+    const base = await readSetting<string>(c.get("store"), "publicAppUrl", "") || new URL(c.req.url).origin;
     try {
       await sendEmail(c.env, email, "Verify your 3XUI Manager account", `<p>Verify your account: <a href="${base}/verify-email?token=${encodeURIComponent(raw)}">Continue</a></p>`);
     } catch (error) {
@@ -222,7 +222,7 @@ auth.post("/forgot-password", async (c) => {
     const user = await c.get("store").get<User>("users", index.userId);
     if (user) {
       await c.get("store").put("password-resets", digest, { userId: user.id, expiresAt: expiryAfter(30 * 60), createdAt: new Date().toISOString() } satisfies PasswordReset);
-      const base = c.env.PUBLIC_APP_URL ?? new URL(c.req.url).origin;
+      const base = await readSetting<string>(c.get("store"), "publicAppUrl", "") || new URL(c.req.url).origin;
       try { await sendEmail(c.env, user.email, "Reset your 3XUI Manager password", `<p>Reset your password: <a href="${base}/reset-password?token=${encodeURIComponent(token)}">Continue</a></p>`); }
       catch (error) { console.error(JSON.stringify({ event: "password_reset_email_failed", userId: user.id, message: error instanceof Error ? error.message : "unknown" })); }
     }

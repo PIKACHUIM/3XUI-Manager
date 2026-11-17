@@ -26,8 +26,7 @@
   ],
   "vars": {
     "STORAGE_DRIVER": "d1",
-    "APP_NAME": "3XUI Manager",
-    "REGISTRATION_ENABLED": "true"
+    "APP_NAME": "3XUI Manager"
   },
   "triggers": {
     "crons": ["* * * * *"]

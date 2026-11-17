@@ -6,6 +6,20 @@ import { md5Hex } from "./crypto";
 import { createWaffoCheckout, verifyWaffoWebhook } from "./waffo";
 import { createZpayCheckout, verifyZpaySignature } from "./zpay";
 
+import { businessSettingNames, prepareBusinessSettings } from "../../services/settings";
+import { getStore } from "../../storage";
+
+async function configuredEnv(values: Record<string, string>): Promise<RuntimeEnv> {
+  const rows = new Map<string, string>();
+  const env = { STORAGE_DRIVER: "kv", APP_ENCRYPTION_KEY: "payment-test-encryption-key-32-characters", APP_KV: {
+    get: async (key: string) => rows.has(key) ? JSON.parse(rows.get(key)!) : null,
+    put: async (key: string, value: string) => { rows.set(key, value); },
+  } } as unknown as RuntimeEnv;
+  const settings = Object.fromEntries(Object.entries(businessSettingNames).filter(([name]) => values[name] !== undefined).map(([name, key]) => [key, values[name]]));
+  for (const [key, value] of Object.entries(await prepareBusinessSettings(settings, env))) await getStore(env).put("settings", key, { key, value });
+  return env;
+}
+
 const createRsaKeyPair = () => generateKeyPairSync("rsa", {
   modulusLength: 2048,
   publicKeyEncoding: { type: "spki", format: "pem" },
@@ -32,7 +46,7 @@ describe("Z-PAY adapter", () => {
       return new Response(JSON.stringify({ code: 11, payurl: "https://pay.example.test/order/1", O_id: "provider-1" }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const env = { ZPAY_PID: "merchant", ZPAY_KEY: "secret", PUBLIC_APP_URL: "https://manager.example.test" } as unknown as RuntimeEnv;
+    const env = await configuredEnv({ ZPAY_PID: "merchant", ZPAY_KEY: "secret", PUBLIC_APP_URL: "https://manager.example.test" });
     const order = { id: "order-1", currency: "CNY" } as Order;
 
     await expect(createZpayCheckout(env, order, "Plan", "12.30", "203.0.113.8")).resolves.toEqual({
@@ -63,14 +77,14 @@ describe("Waffo adapter", () => {
       return new Response(responseBody, { status: 200, headers: { "X-SIGNATURE": signPayload(responseBody, waffoKeys.privateKey) } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const env = {
+    const env = await configuredEnv({
       WAFFO_API_KEY: "api-key",
       WAFFO_SIGNING_KEY: merchantKeys.privateKey,
       WAFFO_PUBLIC_KEY: waffoKeys.publicKey,
       WAFFO_MERCHANT_ID: "merchant-1",
       WAFFO_ENVIRONMENT: "sandbox",
       PUBLIC_APP_URL: "https://manager.example.test",
-    } as unknown as RuntimeEnv;
+    });
     const order = { id: "12345678901234567890123456789012", currency: "USD", expiresAt: "2026-11-14T17:00:00.000Z" } as Order;
     const user = { id: "user-1", email: "user@example.test" } as User;
 
@@ -86,7 +100,7 @@ describe("Waffo adapter", () => {
     ["PAY_IN_PROGRESS", false, false],
   ])("maps the documented %s order status", async (orderStatus, succeeded, final) => {
     const keys = createRsaKeyPair();
-    const env = { WAFFO_PUBLIC_KEY: keys.publicKey } as unknown as RuntimeEnv;
+    const env = await configuredEnv({ WAFFO_PUBLIC_KEY: keys.publicKey });
     const rawBody = JSON.stringify({
       eventType: "PAYMENT_NOTIFICATION",
       result: {
@@ -110,7 +124,7 @@ describe("Waffo adapter", () => {
 
   it("rejects an invalid signature or an unrelated event type", async () => {
     const keys = createRsaKeyPair();
-    const env = { WAFFO_PUBLIC_KEY: keys.publicKey } as unknown as RuntimeEnv;
+    const env = await configuredEnv({ WAFFO_PUBLIC_KEY: keys.publicKey });
     const rawBody = JSON.stringify({ eventType: "REFUND_NOTIFICATION", result: { merchantOrderId: "order-1", orderStatus: "PAY_SUCCESS" } });
 
     await expect(verifyWaffoWebhook(env, rawBody, "invalid-signature")).resolves.toBeNull();

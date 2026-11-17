@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { readBusinessConfig } from "../services/settings";
 import type { Context } from "hono";
 import type { ApiEnv } from "./context";
 import { requireUser, validateSameOrigin } from "./context";
@@ -99,9 +100,10 @@ async function processFinalEvent(c: Context<ApiEnv>, provider: string, event: Pr
 }
 
 async function waffoAcknowledgement(env: ApiEnv["Bindings"], message: "success" | "failed"): Promise<Response> {
-  if (!env.WAFFO_SIGNING_KEY) return new Response(JSON.stringify({ message: "failed" }), { status: 503, headers: { "Content-Type": "application/json" } });
+  const config = await readBusinessConfig(env, ["WAFFO_SIGNING_KEY"]);
+  if (!config.WAFFO_SIGNING_KEY) return new Response(JSON.stringify({ message: "failed" }), { status: 503, headers: { "Content-Type": "application/json" } });
   const body = JSON.stringify({ message });
-  const signature = await signRsaSha256(body, env.WAFFO_SIGNING_KEY);
+  const signature = await signRsaSha256(body, config.WAFFO_SIGNING_KEY);
   return new Response(body, { status: 200, headers: { "Content-Type": "application/json", "X-SIGNATURE": signature } });
 }
 

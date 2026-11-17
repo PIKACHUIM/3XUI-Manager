@@ -1,9 +1,11 @@
 import type { RuntimeEnv } from "../env";
+import { readBusinessConfig } from "./settings";
 
 export async function verifyTurnstile(env: RuntimeEnv, token: string | undefined, expectedAction: string, expectedHostname: string, remoteIp?: string): Promise<boolean> {
-  if (!env.TURNSTILE_SECRET_KEY || !token || token.length > 2048 || !expectedAction || !expectedHostname) return false;
+  const config = await readBusinessConfig(env, ["TURNSTILE_SECRET_KEY"]);
+  if (!config.TURNSTILE_SECRET_KEY || !token || token.length > 2048 || !expectedAction || !expectedHostname) return false;
   const form = new FormData();
-  form.set("secret", env.TURNSTILE_SECRET_KEY);
+  form.set("secret", config.TURNSTILE_SECRET_KEY);
   form.set("response", token);
   if (remoteIp) form.set("remoteip", remoteIp);
   try {

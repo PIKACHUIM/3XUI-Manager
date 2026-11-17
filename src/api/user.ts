@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { readSetting, servesPlan } from "../domain/defaults";
+import { randomCheckinReward, readCheckinRewardRange, readSetting, servesPlan } from "../domain/defaults";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, Order, Plan, User } from "../domain/types";
 import { verifyTurnstile } from "../services/turnstile";
 import { notificationRecordId, type UserNotification } from "../services/notifications";
@@ -73,9 +73,9 @@ userApi.post("/checkin", async (c) => {
   if (turnstileRequired && !(await verifyTurnstile(c.env, typeof body.turnstileToken === "string" ? body.turnstileToken : undefined, "checkin", new URL(c.req.url).hostname, c.req.header("cf-connecting-ip")))) {
     return c.json({ error: "Human verification failed." }, 422);
   }
-  const rewardBytes = await readSetting<number>(store, "checkinTrafficBytes", 200 * 1024 * 1024);
-  if (!Number.isSafeInteger(rewardBytes) || rewardBytes < 0) return c.json({ error: "Check-in reward configuration is invalid." }, 503);
-  if (rewardBytes === 0) return c.json({ error: "Check-in rewards are disabled." }, 422);
+  const rewardRange = await readCheckinRewardRange(store);
+  if (!rewardRange) return c.json({ error: "Check-in reward configuration is invalid." }, 503);
+  if (rewardRange.maxRewardBytes === 0) return c.json({ error: "Check-in rewards are disabled." }, 422);
   const configuredTimeZone = await readSetting<unknown>(store, "timezone", "UTC");
   const timeZone = typeof configuredTimeZone === "string" && configuredTimeZone ? configuredTimeZone : "UTC";
   const userId = c.get("user").id;
@@ -83,6 +83,7 @@ userApi.post("/checkin", async (c) => {
   const lockOwner = crypto.randomUUID();
   if (!(await store.acquireLease(lockName, lockOwner, Date.now() + 60_000))) return c.json({ error: "Another account update is being processed." }, 409);
   let updatedUser: User | null = null;
+  let rewardBytes = 0;
   const checkedInAt = new Date().toISOString();
   try {
     const current = await store.get<User>("users", userId);
@@ -92,6 +93,7 @@ userApi.post("/checkin", async (c) => {
       ? dateInTimeZone(new Date(current.lastCheckinAt), timeZone)
       : null;
     if (lastCheckinDate === today) return c.json({ error: "You have already checked in today." }, 409);
+    rewardBytes = randomCheckinReward(rewardRange);
     const nextTrafficBytes = current.planTrafficBytes + rewardBytes;
     if (!Number.isSafeInteger(nextTrafficBytes) || current.planTrafficBytes < 0) return c.json({ error: "Account traffic quota cannot accept this reward." }, 422);
     const nextStreak = lastCheckinDate === previousCalendarDay(today) && Number.isSafeInteger(current.checkinStreak) && current.checkinStreak >= 0
@@ -130,7 +132,7 @@ userApi.get("/overview", async (c) => {
     listAll<InboundNodeBinding>(store, "inbound-node-bindings"),
     listAll<NodeRecord>(store, "nodes"),
     listAll<ClientMapping>(store, "clients", `${user.id}:`),
-    readSetting<number>(store, "checkinTrafficBytes", 200 * 1024 * 1024),
+    readCheckinRewardRange(store),
     readSetting<unknown>(store, "timezone", "UTC"),
   ]);
   const availableInbounds = new Set(inbounds.filter((inbound) => servesPlan(inbound, user.planLevel)).map((inbound) => inbound.id));
@@ -146,7 +148,7 @@ userApi.get("/overview", async (c) => {
   const lastCheckinDay = user.lastCheckinAt && !Number.isNaN(Date.parse(user.lastCheckinAt))
     ? dateInTimeZone(new Date(user.lastCheckinAt), timeZone)
     : null;
-  const rewardBytes = Number.isSafeInteger(configuredReward) && configuredReward >= 0 ? configuredReward : 0;
+  const { minRewardBytes, maxRewardBytes } = configuredReward ?? { minRewardBytes: 0, maxRewardBytes: 0 };
   const usageToday = now.toISOString().slice(0, 10);
   const usage = dailyUsage.filter((item) => item.usageDay >= new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10) && item.usageDay <= usageToday);
   return c.json({
@@ -163,7 +165,7 @@ userApi.get("/overview", async (c) => {
     clients: mappings.filter((mapping) => availableInbounds.has(mapping.inboundId)).map(({ encryptedSecret: _secret, ...mapping }) => mapping),
     balanceMinor: user.balanceMinor,
     capabilities: { trafficMetering: store instanceof D1Store, quotaEnforcement: store instanceof D1Store, atomicPaymentSettlement: store instanceof D1Store },
-    attendance: { streak: user.checkinStreak, lastCheckinAt: user.lastCheckinAt, checkedInToday: lastCheckinDay === today, rewardBytes },
+    attendance: { streak: user.checkinStreak, lastCheckinAt: user.lastCheckinAt, checkedInToday: lastCheckinDay === today, rewardBytes: minRewardBytes, minRewardBytes, maxRewardBytes },
   });
 });
 
