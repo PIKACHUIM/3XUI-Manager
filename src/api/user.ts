@@ -5,6 +5,7 @@ import { verifyTurnstile } from "../services/turnstile";
 import { notificationRecordId, type UserNotification } from "../services/notifications";
 import { syncUserEntitlements } from "../services/xui-sync";
 import { D1Store } from "../storage/d1";
+import { subscriptionCredential } from "../services/subscriptions";
 import type { DocumentStore, Page } from "../storage/store";
 import { requireUser, validateSameOrigin } from "./context";
 import type { ApiEnv } from "./context";
@@ -239,6 +240,25 @@ userApi.get("/orders", async (c) => {
     .filter((order) => order.userId === user.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return c.json({ items, count: items.length });
+});
+
+userApi.post("/subscription/:action", async (c) => {
+  const action = c.req.param("action");
+  if (action !== "links" && action !== "reset") return c.json({ error: "Not found." }, 404);
+  c.header("Cache-Control", "private, no-store");
+  c.header("Referrer-Policy", "no-referrer");
+  if (!c.env.APP_ENCRYPTION_KEY || c.env.APP_ENCRYPTION_KEY.length < 32) return c.json({ error: "Subscription encryption is not configured." }, 503);
+  try {
+    const credential = await subscriptionCredential(c.get("store"), c.get("user").id, c.env.APP_ENCRYPTION_KEY, action === "reset");
+    const base = `${new URL(c.req.url).origin}/api/subscriptions/${credential.token}`;
+    return c.json({
+      links: { clash: `${base}?format=clash`, v2ray: `${base}?format=v2ray`, shadowsocks: `${base}?format=shadowsocks` },
+      formats: { clash: { label: "Clash / Mihomo" }, v2ray: { label: "V2Ray / v2rayN" }, shadowsocks: { label: "Shadowsocks / SIP008", note: "Only compatible Shadowsocks nodes with verified credentials are included." } },
+      updatedAt: credential.updatedAt,
+    });
+  } catch {
+    return c.json({ error: "Subscription links are temporarily unavailable. Please retry." }, 503);
+  }
 });
 
 userApi.get("/subscription", async (c) => {

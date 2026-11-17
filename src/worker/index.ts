@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import auth from "../api/auth";
 import admin from "../api/admin";
 import userApi from "../api/user";
+import subscriptions from "../api/subscriptions";
 import { payments, webhooks } from "../api/payments";
 import { api, type ApiEnv } from "../api/context";
 import { D1Store } from "../storage/d1";
@@ -13,6 +14,7 @@ import { runTrafficCollection } from "../services/traffic";
 api.route("/api/auth", auth);
 api.route("/api/admin", admin);
 api.route("/api/user", userApi);
+api.route("/api/subscriptions", subscriptions);
 api.route("/api/payments", payments);
 api.route("/api/webhooks", webhooks);
 api.get("/api/health", (c) => {
@@ -31,7 +33,9 @@ app.use("/api/*", cors({
 app.route("/", api);
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((error, c) => {
-  console.error(JSON.stringify({ event: "worker_error", message: error.message, path: new URL(c.req.url).pathname }));
+  const path = new URL(c.req.url).pathname;
+  const subscriptionRequest = path.startsWith("/api/subscriptions/");
+  console.error(JSON.stringify({ event: "worker_error", message: subscriptionRequest ? "Subscription request failed" : error.message, path: subscriptionRequest ? "/api/subscriptions/[redacted]" : path }));
   return c.json({ error: "Internal server error" }, 500);
 });
 

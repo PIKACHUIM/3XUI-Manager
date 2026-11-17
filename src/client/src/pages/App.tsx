@@ -12,7 +12,10 @@ import {
 import { detectLocale, EN_MESSAGES, LOCALE_META, LOCALES, localeDirection, messages, phrase, pick, saveLocale, say, type Locale, type MessageKey } from "../lib/i18n";
 import { buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, kcpHeaderTypes, tlsVersions, trafficResetUnits, xhttpModes } from "../lib/inbound-config";
 
-type PageKey = "overview" | "subscription" | "nodes" | "plans" | "account" | "checkin" | "users" | "inbounds" | "orders" | "system";
+import { HelpPage } from "./HelpPage";
+import { SubscriptionLinks, type SubscriptionLinksData } from "./SubscriptionLinks";
+
+type PageKey = "help" | "overview" | "subscription" | "nodes" | "plans" | "account" | "checkin" | "users" | "inbounds" | "orders" | "system";
 type MenuItem = { key: PageKey; icon: LucideIcon; label: MessageKey };
 
 const userMenu: MenuItem[] = [
@@ -71,7 +74,7 @@ type UserNodeData = { node: UserOverviewData["nodes"][number]; inbound: { id: st
 type DisplayNode = { id?: string; name: string; region: string; address?: string; flag: string; multiplier: string; latency: string; load: number | null; color: string; state: string; enabled?: boolean; inbounds?: number; checkedAt?: string };
 type UserOrderData = { id: string; planId: string | null; type: string; amountMinor: number; currency: string; provider: string; status: string; createdAt: string; metadata?: Record<string, unknown> };
 type NotificationData = { id: string; type: string; title: string; body: string; createdAt: string; readAt: string | null };
-type UserSubscriptionData = { plan: ApiPlan | null; active: boolean; startedAt: string; expiresAt: string | null; traffic: { usedBytes: number; limitBytes: number; remainingBytes: number }; clients: Array<{ inboundName: string; protocol: string; port: number; enabled: boolean; syncStatus: string }>; capabilities: UserOverviewData["capabilities"] };
+type UserSubscriptionData = { links?: SubscriptionLinksData; plan: ApiPlan | null; active: boolean; startedAt: string; expiresAt: string | null; traffic: { usedBytes: number; limitBytes: number; remainingBytes: number }; clients: Array<{ inboundName: string; protocol: string; port: number; enabled: boolean; syncStatus: string }>; capabilities: UserOverviewData["capabilities"] };
 
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { credentials: "include", ...init });
@@ -486,6 +489,9 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         setUserNodeRecords(nodeResult.items);
         setUserOrders(orderResult.items);
         setSubscription(nextSubscription);
+        void apiRequest<{ links: SubscriptionLinksData }>("/api/user/subscription/links", { method: "POST", signal: controller.signal })
+          .then((result) => { if (!controller.signal.aborted) setSubscription((current) => current ? { ...current, links: result.links } : current); })
+          .catch(() => { /* 订阅链接可在订阅页面单独重试，不阻断账户数据。 */ });
       });
     void load.catch((error: unknown) => {
       if (!controller.signal.aborted) setApiError(error instanceof Error ? error.message : "Unable to load account data.");
@@ -502,7 +508,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
     return () => controller.abort();
   }, [refreshToken, sessionUser.id]);
   const menu = admin ? adminMenu : userMenu;
-  const title = t(menu.find((item) => item.key === page)?.label ?? "overview");
+  const title = page === "help" ? say(locale, "帮助与支持", "Help & support") : t(menu.find((item) => item.key === page)?.label ?? "overview");
   const createKind: AdminCreateKind | null = page === "nodes" ? "node" : page === "inbounds" ? "inbound" : page === "plans" ? "plan" : page === "users" ? "user" : null;
   const createLabel = createKind === "node" ? (say(locale, "添加节点", "Add node")) : createKind === "inbound" ? (say(locale, "添加入站", "Add inbound")) : createKind === "plan" ? (say(locale, "添加套餐", "Add plan")) : createKind === "user" ? (say(locale, "添加用户", "Add user")) : "";
   const initials = sessionUser.email.slice(0, 2).toUpperCase();
@@ -642,7 +648,19 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
     }
   };
   const copyLink = async () => {
-    flash(say(locale, "订阅链接尚未由服务端配置", "A subscription URL has not been configured by the server."));
+    const url = subscription?.links?.clash;
+    if (!url) { setPage("subscription"); return; }
+    try {
+      await navigator.clipboard.writeText(url);
+      flash(say(locale, "Clash 订阅链接已复制", "Clash subscription link copied."));
+    } catch {
+      setPage("subscription");
+      flash(say(locale, "无法访问剪贴板，请手动复制链接", "Clipboard access failed. Copy the link manually."));
+    }
+  };
+  const resetSubscription = async (reset = true) => {
+    const result = await apiRequest<{ links: SubscriptionLinksData }>(`/api/user/subscription/${reset ? "reset" : "links"}`, { method: "POST" });
+    setSubscription((current) => current ? { ...current, links: result.links } : current);
   };
   const startPlanCheckout = async (plan: ApiPlan) => {
     setApiError("");
@@ -787,7 +805,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
             <small>{apiError || (say(locale, "显示来自服务端的数据", "Account data loaded from the server"))}</small>
             <div className="sync-foot"><span>{say(locale, "数据状态", "Data status")}</span><span>{apiError ? (say(locale, "不可用", "Unavailable")) : apiLoading ? (say(locale, "加载中", "Loading")) : (say(locale, "已加载", "Loaded"))}</span></div>
           </div>
-          <button className="nav-item help-item" title={say(locale, "帮助与支持", "Help & support")} onClick={() => flash(t("support"))}><LifeBuoy size={18} /><span>{say(locale, "帮助与支持", "Help & support")}</span></button>
+          <button className={`nav-item help-item ${page === "help" ? "selected" : ""}`} aria-current={page === "help" ? "page" : undefined} title={say(locale, "帮助与支持", "Help & support")} onClick={() => { setPage("help"); setSearch(""); setEditor(null); setMobileOpen(false); }}><LifeBuoy size={18} /><span>{say(locale, "帮助与支持", "Help & support")}</span></button>
           <div className="profile-row"><div className="avatar avatar-mint">{initials}</div><div className="profile-copy" title={sessionUser.email}><b>{sessionUser.email}</b><small>{admin ? t("adminPortal") : t("userPortal")}</small></div><button className="profile-more" aria-label={t("settings")} onClick={() => setPage("account")}><MoreHorizontal size={19} /></button></div>
         </div>
       </aside>
@@ -823,7 +841,8 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
           {page === "inbounds" && <InboundsPage t={t} locale={locale} rows={inboundRows} onSync={() => setSyncDialog({})} onEdit={(id) => setEditor({ kind: "inbound", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/inbounds/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
           {page === "plans" && (admin ? <PlansAdmin t={t} locale={locale} plans={planRows} onEdit={(id) => setEditor({ kind: "plan", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/plans/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} /> : <PlansPage t={t} locale={locale} plans={userPlans} currentPlan={overview?.plan ?? null} onCheckout={startPlanCheckout} />)}
           {page === "orders" && <OrdersPage t={t} locale={locale} rows={orderDisplayRows} onDelete={(id) => { void mutateAdmin(`/api/admin/orders/${encodeURIComponent(id)}`, "DELETE"); }} onAction={(label) => flash(label)} />}
-          {page === "subscription" && <SubscriptionPage t={t} locale={locale} subscription={subscription} onCopy={copyLink} />}
+          {page === "help" && <HelpPage locale={locale} onSubscription={() => { setAdmin(false); setPage("subscription"); }} onPlans={() => { setAdmin(false); setPage("plans"); }} />}
+          {page === "subscription" && <SubscriptionPage t={t} locale={locale} subscription={subscription} onCopy={copyLink} onReset={resetSubscription} />}
           {page === "account" && <AccountPage t={t} locale={locale} user={sessionUser} overview={overview} rows={orderDisplayRows} onNavigate={setPage} />}
           {page === "checkin" && <CheckinPage t={t} locale={locale} attendance={overview?.attendance ?? null} available={Boolean(overview?.capabilities.trafficMetering)} securityConfigAvailable={publicConfig !== null} turnstileRequired={Boolean(publicConfig?.checkinTurnstileEnabled)} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} busy={checkinBusy} onCheckin={(token) => { void submitCheckin(token); }} />}
           {page === "system" && <SystemPage t={t} locale={locale} onSaved={async () => { setRefreshToken((value) => value + 1); await onSettingsSaved(); }} theme={theme} accent={accent} onTheme={chooseTheme} onAccent={setAccent} onLocale={changeLocale} onAction={(label) => flash(label)} />}
@@ -1543,8 +1562,8 @@ function OrdersPage({ t, locale, rows, onDelete, onAction }: { t: TextFn; locale
     </div>
   </div>;
 }
-function SubscriptionPage({ t, locale, subscription, onCopy }: { t: TextFn; locale: Locale; subscription: UserSubscriptionData | null; onCopy: () => void }) {
-  return <div className="subscription-layout"><section className="panel subscription-hero"><div className="sub-hero-glow" /><div className="member-card-top"><div className="plan-emblem"><Sparkles size={19} /></div><span className="plan-state"><i /> {subscription?.active ? t("active") : t("expired")}</span></div><span className="section-kicker">{say(locale, "当前套餐", "YOUR CURRENT PLAN")}</span><h2>{subscription?.plan?.name ?? t("planName")}</h2><p>{subscription?.plan?.description ?? t("planDescription")}</p><div className="sub-stat-strip"><div><small>{t("level")}</small><b>{subscription?.plan ? phrase(locale, "等级 {n}", "Level {n}", { n: subscription.plan.level }) : "—"}</b></div><div><small>{t("trafficLimit")}</small><b>{formatBytes(subscription?.traffic.limitBytes ?? 0)}</b></div><div><small>{t("expiry")}</small><b>{subscription?.expiresAt ? formatDate(subscription.expiresAt, locale) : "—"}</b></div><div><small>{t("remaining")}</small><b>{formatBytes(subscription?.traffic.remainingBytes ?? 0)}</b></div></div><div className="sub-actions"><button className="primary-button" onClick={onCopy}><ArrowRight size={15} />{t("copyLink")}</button><span className="sub-hint"><ShieldCheck size={14} /> {t("statusGood")}</span></div></section><section className="panel subscription-settings"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "配置", "CONFIGURATION")}</div><h3>{t("subscriptionLink")}</h3><p>{t("copyLink")}</p></div></div><div className="link-copy-row"><code>{say(locale, "尚未配置订阅链接", "Subscription URL is not configured.")}</code><button className="outline-button small" onClick={onCopy}>{t("copy")}</button></div><div className="client-list">{subscription?.clients.map((client) => <div key={`${client.inboundName}:${client.port}`}><span className="client-logo client-v">{client.protocol.slice(0, 1).toUpperCase()}</span><span><b>{client.inboundName}</b><small>{client.protocol.toUpperCase()} · {client.port} · {client.syncStatus}</small></span><span className={`status-chip ${client.enabled ? "" : "pending"}`}><i />{client.enabled ? t("enabled") : t("offline")}</span></div>)}{!subscription?.clients.length && <div className="empty-state"><Network size={20} /><b>{say(locale, "暂无可用客户端", "No connected clients are available.")}</b></div>}</div></section><section className="panel subscription-note"><span className="quick-icon amber"><CircleHelp size={16} /></span><div><b>{t("support")}</b><p>{t("refreshSoon")}</p></div><ArrowRight size={15} /></section></div>;
+function SubscriptionPage({ t, locale, subscription, onCopy, onReset }: { t: TextFn; locale: Locale; subscription: UserSubscriptionData | null; onCopy: () => void; onReset: (reset?: boolean) => Promise<void> }) {
+  return <div className="subscription-layout"><section className="panel subscription-hero"><div className="sub-hero-glow" /><div className="member-card-top"><div className="plan-emblem"><Sparkles size={19} /></div><span className="plan-state"><i /> {subscription?.active ? t("active") : t("expired")}</span></div><span className="section-kicker">{say(locale, "当前套餐", "YOUR CURRENT PLAN")}</span><h2>{subscription?.plan?.name ?? t("planName")}</h2><p>{subscription?.plan?.description ?? t("planDescription")}</p><div className="sub-stat-strip"><div><small>{t("level")}</small><b>{subscription?.plan ? phrase(locale, "等级 {n}", "Level {n}", { n: subscription.plan.level }) : "—"}</b></div><div><small>{t("trafficLimit")}</small><b>{formatBytes(subscription?.traffic.limitBytes ?? 0)}</b></div><div><small>{t("expiry")}</small><b>{subscription?.expiresAt ? formatDate(subscription.expiresAt, locale) : "—"}</b></div><div><small>{t("remaining")}</small><b>{formatBytes(subscription?.traffic.remainingBytes ?? 0)}</b></div></div><div className="sub-actions"><button className="primary-button" onClick={onCopy}><ArrowRight size={15} />{t("copyLink")}</button><span className="sub-hint"><ShieldCheck size={14} /> {t("statusGood")}</span></div></section><section className="panel subscription-settings"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "配置", "CONFIGURATION")}</div><h3>{t("subscriptionLink")}</h3><p>{t("copyLink")}</p></div></div><SubscriptionLinks locale={locale} links={subscription?.links} onReset={onReset} /><div className="client-list">{subscription?.clients.map((client) => <div key={`${client.inboundName}:${client.port}`}><span className="client-logo client-v">{client.protocol.slice(0, 1).toUpperCase()}</span><span><b>{client.inboundName}</b><small>{client.protocol.toUpperCase()} · {client.port} · {client.syncStatus}</small></span><span className={`status-chip ${client.enabled ? "" : "pending"}`}><i />{client.enabled ? t("enabled") : t("offline")}</span></div>)}{!subscription?.clients.length && <div className="empty-state"><Network size={20} /><b>{say(locale, "暂无可用客户端", "No connected clients are available.")}</b></div>}</div></section><section className="panel subscription-note"><span className="quick-icon amber"><CircleHelp size={16} /></span><div><b>{t("support")}</b><p>{t("refreshSoon")}</p></div><ArrowRight size={15} /></section></div>;
 }
 
 function AccountPage({ t, locale, user, overview, rows, onNavigate }: { t: TextFn; locale: Locale; user: AuthenticatedUser; overview: UserOverviewData | null; rows: DisplayOrderRow[]; onNavigate: (page: PageKey) => void }) {
