@@ -66,6 +66,14 @@ export function validatePanelUrl(input: string): URL {
   return url;
 }
 
+/** Replays every cookie the panel set on login, in the shape a browser would send back. */
+function readSessionCookie(response: Response): string | null {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  const entries = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [response.headers.get("set-cookie") ?? ""];
+  const pairs = entries.map((entry) => entry.split(";")[0]?.trim() ?? "").filter((entry) => entry.includes("="));
+  return pairs.length ? pairs.join("; ") : null;
+}
+
 /** Builds the 3X-UI add/update payload, keeping unknown top-level config keys. */
 export function inboundPayload(inbound: Inbound): Record<string, unknown> {
   const { settings, streamSettings, sniffing, ...extra } = inbound.config;
@@ -123,24 +131,62 @@ export class ThreeXuiClient {
       this.bearer = this.token;
       return;
     }
-    const response = await fetch(new URL(`${this.basePath()}/login`, this.origin), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ username: this.node.username, password: this.password }),
-      signal: AbortSignal.timeout(8000),
-    });
-    const cookie = response.headers.get("set-cookie");
-    if (cookie) this.cookie = cookie.split(";")[0] ?? null;
-    const payload = await this.readEnvelope<unknown>(response);
-    if (!response.ok || payload.success === false || (!this.cookie && response.status === 401)) throw new Error(`3X-UI login failed (HTTP ${response.status}).`);
+    await this.login();
+  }
+
+  /**
+   * 3X-UI binds the login body either as a form or as JSON depending on the build,
+   * so send the form encoding first and fall back to JSON when the panel answers success:false.
+   */
+  private async login(): Promise<void> {
+    const attempts: Array<[string, string]> = [
+      ["application/x-www-form-urlencoded", new URLSearchParams({ username: this.node.username, password: this.password }).toString()],
+      ["application/json", JSON.stringify({ username: this.node.username, password: this.password })],
+    ];
+    const errors: string[] = [];
+    for (const [contentType, body] of attempts) {
+      let response: Response;
+      try {
+        response = await fetch(new URL(`${this.basePath()}/login`, this.origin), {
+          method: "POST",
+          headers: { "Content-Type": contentType, Accept: "application/json" },
+          body,
+          redirect: "manual",
+          signal: AbortSignal.timeout(8000),
+        });
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "network error");
+        continue;
+      }
+      const cookie = readSessionCookie(response);
+      const payload = await this.readEnvelope<unknown>(response);
+      if (response.ok && payload.success !== false) {
+        if (!cookie) throw new Error("3X-UI accepted the login but returned no session cookie; configure an API token for this node.");
+        this.cookie = cookie;
+        return;
+      }
+      const message = (payload.msg || `HTTP ${response.status}`).slice(0, 180);
+      errors.push(message);
+      if (response.status === 401 || response.status === 403) break;
+    }
+    throw new Error(`3X-UI login failed: ${errors[0] ?? "unknown error"}`);
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<XuiEnvelope<T>> {
-    const headers = new Headers(init.headers);
-    headers.set("Accept", "application/json");
-    if (this.bearer) headers.set("Authorization", `Bearer ${this.bearer}`);
-    if (this.cookie) headers.set("Cookie", this.cookie);
-    const response = await fetch(new URL(`${this.basePath()}${path}`, this.origin), { ...init, headers, signal: AbortSignal.timeout(10000) });
+    const send = async (): Promise<Response> => {
+      const headers = new Headers(init.headers);
+      headers.set("Accept", "application/json");
+      if (this.bearer) headers.set("Authorization", `Bearer ${this.bearer}`);
+      if (this.cookie) headers.set("Cookie", this.cookie);
+      return fetch(new URL(`${this.basePath()}${path}`, this.origin), { ...init, headers, signal: AbortSignal.timeout(10000) });
+    };
+    let response = await send();
+    if ((response.status === 401 || response.status === 403) && this.bearer && this.password) {
+      this.bearer = null;
+      this.cookie = null;
+      await this.login();
+      response = await send();
+    }
     const payload = await this.readEnvelope<T>(response);
     if (!response.ok || payload.success === false) {
       throw new Error(`3X-UI request failed (HTTP ${response.status}): ${(payload.msg ?? "panel returned an error").slice(0, 180)}`);

@@ -1019,96 +1019,155 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       </>)}
       <div className="admin-form-inline">{checkField("enabled", text("启用节点", "Node enabled"))}</div>
     </>}
-    {kind === "inbound" && <>
+        {kind === "inbound" && <>
       <div className="admin-form-tabs" role="tablist" aria-label={text("入站设置", "Inbound settings")}>{inboundTabs.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} onClick={() => setActiveTab(key)}>{label}</button>)}</div>
       <div className="admin-form-tabpanel" role="tabpanel">
-      <div className="admin-form-grid">
       {activeTab === "basic" && <>
-        {field("name", text("入站名称", "Inbound name"), { required: true, maxLength: 100 })}
-        {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]))}
-        {selectField("network", text("传输方式", "Transport"), inboundNetworks.map((value): [string, string] => [value, inboundNetworkLabels[value] ?? value]))}
-        {selectField("security", text("传输安全", "Transport security"), [["none", text("无", "None")], ["tls", "TLS"], ["reality", "REALITY"]])}
-        {field("port", text("端口", "Port"), { type: "number", min: 1, max: 65535, step: 1, required: true })}
-        {field("listen", text("监听地址（留空为全部）", "Listen address (blank = all)"))}
-        {field("totalGb", text("总流量（十进制 GB，0 为不限）", "Total traffic (decimal GB, 0 = unlimited)"), { type: "number", min: 0, step: 0.001 })}
-        {field("expiryTime", text("到期时间（留空为永不）", "Expiry time (blank = never)"), { type: "datetime-local" })}
-        {selectField("trafficReset", text("流量重置周期", "Traffic reset"), trafficResetUnits.map((value): [string, string] => [value, trafficResetLabel(value, text)]))}
-        {(fields.trafficReset === "monthly" || fields.trafficReset === "weekly") && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 0, max: 31, step: 1 })}
-        {field("tag", text("标签", "Tag"), { maxLength: 64 })}
-        {selectField("shareAddrStrategy", text("分享地址策略", "Share address strategy"), [["node", text("使用节点地址", "Use the node address")], ["listen", text("使用监听地址", "Use the listen address")], ["custom", text("自定义地址", "Custom address")]])}
-        {fields.shareAddrStrategy === "custom" && field("shareAddr", text("自定义分享地址", "Custom share address"), { maxLength: 255 })}
-        {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
-        {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
-        {checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
-        {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
-        {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
-        {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
-        {checkField("enabled", text("启用入站", "Inbound enabled"))}
-        {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
+        {formSection(text("基础", "Basics"), <>
+          {field("name", text("入站名称", "Inbound name"), { required: true, maxLength: 100 })}
+          {field("port", text("端口", "Port"), { type: "number", min: 1, max: 65535, step: 1, required: true })}
+          {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]))}
+          {selectField("network", text("传输方式", "Transport"), inboundNetworks.map((value): [string, string] => [value, inboundNetworkLabels[value] ?? value]))}
+          {selectField("security", text("传输安全", "Transport security"), [["none", text("无", "None")], ["tls", "TLS"], ["reality", "REALITY"]])}
+          {field("listen", text("监听地址（留空为全部）", "Listen address (blank = all)"))}
+        </>)}
+        {formSection(text("流量与到期", "Traffic and expiry"), <>
+          {field("totalGb", text("总流量（十进制 GB，0 为不限）", "Total traffic (decimal GB, 0 = unlimited)"), { type: "number", min: 0, step: 0.001 })}
+          {field("expiryTime", text("到期时间（留空为永不）", "Expiry time (blank = never)"), { type: "datetime-local" })}
+          {selectField("trafficReset", text("流量重置周期", "Traffic reset"), trafficResetUnits.map((value): [string, string] => [value, trafficResetLabel(value, text)]))}
+          {(fields.trafficReset === "monthly" || fields.trafficReset === "weekly") && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 0, max: 31, step: 1 })}
+        </>)}
+        {formSection(text("订阅与分享", "Subscription and sharing"), <>
+          {field("tag", text("标签", "Tag"), { maxLength: 64 })}
+          {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
+          {selectField("shareAddrStrategy", text("分享地址策略", "Share address strategy"), [["node", text("使用节点地址", "Use the node address")], ["listen", text("使用监听地址", "Use the listen address")], ["custom", text("自定义地址", "Custom address")]])}
+          {fields.shareAddrStrategy === "custom" && field("shareAddr", text("自定义分享地址", "Custom share address"), { maxLength: 255 })}
+          {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
+          {checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
+        </>)}
+        {formSection(text("权限与同步", "Access and sync"), <>
+          {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
+          {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
+          {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
+          {checkField("enabled", text("启用入站", "Inbound enabled"))}
+          {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
+        </>)}
       </>}
 
       {activeTab === "protocol" && <>
-        {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 客户端由面板与套餐同步管理，这里只调整入站结构。", "VMess clients are managed by the panel and plan sync; this section only shapes the inbound.")}</div>}
-        {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("VLESS 解密方式", "VLESS decryption"), { placeholder: "none" })}</>}
-        {(fields.protocol === "vless" || fields.protocol === "trojan") && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}
-        {fields.protocol === "shadowsocks" && <>{selectField("ssMethod", text("加密方式", "Cipher"), [["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"], ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm"], ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"], ["aes-128-gcm", "aes-128-gcm"], ["aes-256-gcm", "aes-256-gcm"], ["chacha20-poly1305", "chacha20-poly1305"], ["xchacha20-poly1305", "xchacha20-poly1305"], ["none", text("无", "None")]])}{field("ssPassword", text("入站密码", "Inbound password"))}{field("ssNetwork", text("网络（tcp,udp）", "Network (tcp,udp)"))}</>}
-        {fields.protocol === "dokodemo-door" && <>{field("dokodemoAddress", text("目标地址", "Destination address"), { placeholder: "1.1.1.1" })}{field("dokodemoPort", text("目标端口", "Destination port"), { type: "number", min: 0, max: 65535, step: 1 })}{selectField("dokodemoNetwork", text("网络", "Network"), [["tcp", "TCP"], ["udp", "UDP"], ["tcp,udp", "TCP+UDP"]])}{checkField("dokodemoFollowRedirect", text("跟随原始目标地址", "Follow redirect"))}{field("dokodemoTimeout", text("超时（秒）", "Timeout (seconds)"), { type: "number", min: 0, step: 1 })}</>}
-        {(fields.protocol === "http" || fields.protocol === "socks" || fields.protocol === "mixed") && <>{selectField("proxyAuth", text("认证方式", "Authentication"), [["noauth", text("无认证", "No auth")], ["password", text("用户名密码", "Username and password")]])}{areaField("protocolAccounts", text("账户（JSON 数组）", "Accounts (JSON array)"), { placeholder: '[{"user":"name","pass":"secret"}]' })}{fields.protocol !== "http" && checkField("proxyUdp", text("允许 UDP", "Allow UDP"))}{fields.protocol === "http" ? <>{checkField("httpAllowTransparent", text("允许透明代理", "Allow transparent proxy"))}{field("httpUserLevel", text("用户等级", "User level"), { type: "number", min: 0, step: 1 })}</> : field("proxyIp", text("本地 IP", "Local IP"), { placeholder: "127.0.0.1" })}</>}
-        {fields.protocol === "wireguard" && <>{field("wireguardSecretKey", text("WireGuard 私钥", "WireGuard secret key"))}{field("wireguardAddress", text("WireGuard 地址（CIDR，逗号分隔）", "WireGuard address (CIDR, comma separated)"))}{field("wireguardMtu", "MTU", { type: "number", min: 0, max: 65535, step: 1 })}{checkField("wireguardNoKernelTun", text("禁用内核 TUN", "Disable kernel TUN"))}{areaField("wireguardPeers", text("对端（JSON 数组）", "Peers (JSON array)"), { placeholder: '[{"publicKey":"…","allowedIPs":["0.0.0.0/0"]}]' })}{areaField("wireguardNoise", text("Noise 配置（JSON）", "Noise settings (JSON)"))}</>}
-        {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
+        {formSection(text("协议参数", "Protocol options"), <>
+          {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 客户端由面板与套餐同步管理，这里只调整入站结构。", "VMess clients are managed by the panel and plan sync; this section only shapes the inbound.")}</div>}
+          {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("VLESS 解密方式", "VLESS decryption"), { placeholder: "none" })}</>}
+          {fields.protocol === "shadowsocks" && <>{selectField("ssMethod", text("加密方式", "Cipher"), [["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"], ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm"], ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"], ["aes-128-gcm", "aes-128-gcm"], ["aes-256-gcm", "aes-256-gcm"], ["chacha20-poly1305", "chacha20-poly1305"], ["xchacha20-poly1305", "xchacha20-poly1305"], ["none", text("无", "None")]])}{field("ssPassword", text("入站密码", "Inbound password"))}{field("ssNetwork", text("网络（tcp,udp）", "Network (tcp,udp)"))}</>}
+          {fields.protocol === "dokodemo-door" && <>{field("dokodemoAddress", text("目标地址", "Destination address"), { placeholder: "1.1.1.1" })}{field("dokodemoPort", text("目标端口", "Destination port"), { type: "number", min: 0, max: 65535, step: 1 })}{selectField("dokodemoNetwork", text("网络", "Network"), [["tcp", "TCP"], ["udp", "UDP"], ["tcp,udp", "TCP+UDP"]])}{checkField("dokodemoFollowRedirect", text("跟随原始目标地址", "Follow redirect"))}{field("dokodemoTimeout", text("超时（秒）", "Timeout (seconds)"), { type: "number", min: 0, step: 1 })}</>}
+          {(fields.protocol === "http" || fields.protocol === "socks" || fields.protocol === "mixed") && <>{selectField("proxyAuth", text("认证方式", "Authentication"), [["noauth", text("无认证", "No auth")], ["password", text("用户名密码", "Username and password")]])}{areaField("protocolAccounts", text("账户（JSON 数组）", "Accounts (JSON array)"), { placeholder: '[{"user":"name","pass":"secret"}]' })}{fields.protocol !== "http" && checkField("proxyUdp", text("允许 UDP", "Allow UDP"))}{fields.protocol === "http" ? <>{checkField("httpAllowTransparent", text("允许透明代理", "Allow transparent proxy"))}{field("httpUserLevel", text("用户等级", "User level"), { type: "number", min: 0, step: 1 })}</> : field("proxyIp", text("本地 IP", "Local IP"), { placeholder: "127.0.0.1" })}</>}
+          {fields.protocol === "wireguard" && <>{field("wireguardSecretKey", text("WireGuard 私钥", "WireGuard secret key"))}{field("wireguardAddress", text("WireGuard 地址（CIDR，逗号分隔）", "WireGuard address (CIDR, comma separated)"))}{field("wireguardMtu", "MTU", { type: "number", min: 0, max: 65535, step: 1 })}{checkField("wireguardNoKernelTun", text("禁用内核 TUN", "Disable kernel TUN"))}{areaField("wireguardPeers", text("对端（JSON 数组）", "Peers (JSON array)"), { placeholder: '[{"publicKey":"…","allowedIPs":["0.0.0.0/0"]}]' })}{areaField("wireguardNoise", text("Noise 配置（JSON）", "Noise settings (JSON)"))}</>}
+        </>)}
+        {formSection(text("回落与额外配置", "Fallbacks and extras"), <>
+          {(fields.protocol === "vless" || fields.protocol === "trojan") && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}
+          {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
+        </>)}
       </>}
 
-      {activeTab === "transport" && <>
+      {activeTab === "transport" && <div className="admin-form-block"><h3>{text("传输参数", "Transport options")}</h3><div className="admin-form-grid two-col">
         {(fields.network === "tcp" || fields.network === "raw") && <>{selectField("tcpHeader", text("TCP 伪装类型", "TCP header type"), [["none", text("无", "None")], ["http", "HTTP"]])}{checkField("tcpAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{fields.tcpHeader === "http" && <>{areaField("tcpRequest", text("HTTP 请求头（JSON）", "HTTP request (JSON)"))}{areaField("tcpResponse", text("HTTP 响应头（JSON）", "HTTP response (JSON)"))}</>}</>}
-        {fields.network === "ws" && <>{field("wsPath", text("路径", "Path"))}{field("wsHost", text("Host（可选）", "Host (optional)"))}{areaField("wsHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}{field("wsHeartbeatPeriod", "heartbeatPeriod", { type: "number", min: 0, step: 1 })}{field("wsMaxEarlyData", "maxEarlyData", { type: "number", min: 0, step: 1 })}{field("wsEarlyDataHeaderName", "earlyDataHeaderName")}{checkField("wsAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}</>}
+        {fields.network === "ws" && <>{field("wsPath", text("路径", "Path"))}{field("wsHost", text("Host（可选）", "Host (optional)"))}{field("wsHeartbeatPeriod", "heartbeatPeriod", { type: "number", min: 0, step: 1 })}{field("wsMaxEarlyData", "maxEarlyData", { type: "number", min: 0, step: 1 })}{field("wsEarlyDataHeaderName", "earlyDataHeaderName")}{checkField("wsAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{areaField("wsHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}</>}
         {fields.network === "http" && <>{field("h2Path", text("路径", "Path"))}{field("h2Host", text("Hosts（逗号分隔）", "Hosts (comma separated)"))}{selectField("h2Method", text("HTTP 方法", "HTTP method"), [["PUT", "PUT"], ["GET", "GET"]])}{field("h2ReadIdleTimeout", "readIdleTimeout", { type: "number", min: 0, step: 1 })}{field("h2HealthCheckTimeout", "healthCheckTimeout", { type: "number", min: 0, step: 1 })}{areaField("h2Headers", text("请求头（JSON）", "Headers (JSON)"))}</>}
-        {fields.network === "httpupgrade" && <>{field("upgradePath", text("路径", "Path"))}{field("upgradeHost", text("Host（可选）", "Host (optional)"))}{areaField("upgradeHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}{checkField("upgradeAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}</>}
-        {fields.network === "grpc" && <>{field("grpcService", text("gRPC 服务名", "gRPC service name"))}{field("grpcAuthority", text("gRPC authority", "gRPC authority"))}{checkField("grpcMultiMode", text("多路复用模式", "Multi mode"))}{field("grpcIdleTimeout", "idle_timeout", { type: "number", min: 0, step: 1 })}{field("grpcHealthCheckTimeout", "health_check_timeout", { type: "number", min: 0, step: 1 })}{checkField("grpcPermitWithoutStream", "permit_without_stream")}{field("grpcInitialWindowsSize", "initial_windows_size", { type: "number", min: 0, step: 1 })}</>}
-        {fields.network === "xhttp" && <>{field("xhttpPath", text("路径", "Path"))}{field("xhttpHost", text("Host（可选）", "Host (optional)"))}{selectField("xhttpMode", text("XHTTP 模式", "XHTTP mode"), xhttpModes.map((value): [string, string] => [value, value]))}{field("xhttpXPaddingBytes", "xPaddingBytes", { placeholder: "100-1000" })}{field("xhttpScMaxBufferedPosts", "scMaxBufferedPosts", { type: "number", min: 0, step: 1 })}{field("xhttpScMaxEachPostBytes", "scMaxEachPostBytes", { type: "number", min: 0, step: 1 })}{checkField("xhttpNoGRPCHeader", "noGRPCHeader")}{field("xhttpMaxConcurrency", "xmux.maxConcurrency", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConnections", "xmux.maxConnections", { type: "number", min: 0, step: 1 })}{field("xhttpCMaxReuseTimes", "xmux.cMaxReuseTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHMaxRequestTimes", "xmux.hMaxRequestTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHKeepAlivePeriod", "xmux.hKeepAlivePeriod", { type: "number", min: 0, step: 1 })}{field("xhttpMaxLifetime", "xmux.maxLifetime", { type: "number", min: 0, step: 1 })}{areaField("xhttpHeaders", text("请求头（JSON）", "Headers (JSON)"))}</>}
-        {fields.network === "kcp" && <>{field("kcpMtu", "mtu", { type: "number", min: 576, max: 1460, step: 1 })}{field("kcpTti", "tti", { type: "number", min: 10, max: 100, step: 1 })}{field("kcpUplinkCapacity", "uplinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpDownlinkCapacity", "downlinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpCwndMultiplier", "cwndMultiplier", { type: "number", min: 0, step: 0.1 })}{field("kcpMaxSendingWindow", "maxSendingWindow", { type: "number", min: 0, step: 1 })}{field("kcpReadBufferSize", "readBufferSize", { type: "number", min: 0, step: 1 })}{field("kcpWriteBufferSize", "writeBufferSize", { type: "number", min: 0, step: 1 })}{selectField("kcpHeaderType", text("伪装类型", "Header type"), kcpHeaderTypes.map((value): [string, string] => [value, value]))}{checkField("kcpCongestion", text("启用拥塞控制", "Enable congestion control"))}{field("kcpSeed", text("种子（可选）", "Seed (optional)"))}</>}
+        {fields.network === "httpupgrade" && <>{field("upgradePath", text("路径", "Path"))}{field("upgradeHost", text("Host（可选）", "Host (optional)"))}{checkField("upgradeAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{areaField("upgradeHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}</>}
+        {fields.network === "grpc" && <>{field("grpcService", text("gRPC 服务名", "gRPC service name"))}{field("grpcAuthority", text("gRPC authority", "gRPC authority"))}{field("grpcIdleTimeout", "idle_timeout", { type: "number", min: 0, step: 1 })}{field("grpcHealthCheckTimeout", "health_check_timeout", { type: "number", min: 0, step: 1 })}{field("grpcInitialWindowsSize", "initial_windows_size", { type: "number", min: 0, step: 1 })}{checkField("grpcMultiMode", text("多路复用模式", "Multi mode"))}{checkField("grpcPermitWithoutStream", "permit_without_stream")}</>}
+        {fields.network === "xhttp" && <>{field("xhttpPath", text("路径", "Path"))}{field("xhttpHost", text("Host（可选）", "Host (optional)"))}{selectField("xhttpMode", text("XHTTP 模式", "XHTTP mode"), xhttpModes.map((value): [string, string] => [value, value]))}{field("xhttpXPaddingBytes", "xPaddingBytes", { placeholder: "100-1000" })}{field("xhttpScMaxBufferedPosts", "scMaxBufferedPosts", { type: "number", min: 0, step: 1 })}{field("xhttpScMaxEachPostBytes", "scMaxEachPostBytes", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConcurrency", "xmux.maxConcurrency", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConnections", "xmux.maxConnections", { type: "number", min: 0, step: 1 })}{field("xhttpCMaxReuseTimes", "xmux.cMaxReuseTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHMaxRequestTimes", "xmux.hMaxRequestTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHKeepAlivePeriod", "xmux.hKeepAlivePeriod", { type: "number", min: 0, step: 1 })}{field("xhttpMaxLifetime", "xmux.maxLifetime", { type: "number", min: 0, step: 1 })}{checkField("xhttpNoGRPCHeader", "noGRPCHeader")}{areaField("xhttpHeaders", text("请求头（JSON）", "Headers (JSON)"))}</>}
+        {fields.network === "kcp" && <>{field("kcpMtu", "mtu", { type: "number", min: 576, max: 1460, step: 1 })}{field("kcpTti", "tti", { type: "number", min: 10, max: 100, step: 1 })}{field("kcpUplinkCapacity", "uplinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpDownlinkCapacity", "downlinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpCwndMultiplier", "cwndMultiplier", { type: "number", min: 0, step: 0.1 })}{field("kcpMaxSendingWindow", "maxSendingWindow", { type: "number", min: 0, step: 1 })}{field("kcpReadBufferSize", "readBufferSize", { type: "number", min: 0, step: 1 })}{field("kcpWriteBufferSize", "writeBufferSize", { type: "number", min: 0, step: 1 })}{selectField("kcpHeaderType", text("伪装类型", "Header type"), kcpHeaderTypes.map((value): [string, string] => [value, value]))}{field("kcpSeed", text("种子（可选）", "Seed (optional)"))}{checkField("kcpCongestion", text("启用拥塞控制", "Enable congestion control"))}</>}
         {fields.network === "hysteria" && <>{field("hysteriaVersion", text("Hysteria 版本", "Hysteria version"), { type: "number", min: 1, max: 2, step: 1 })}{field("hysteriaAuth", text("认证字符串", "Auth string"))}{field("hysteriaUdpIdleTimeout", "udpIdleTimeout", { type: "number", min: 0, step: 1 })}{areaField("hysteriaMasquerade", text("伪装站点（JSON）", "Masquerade (JSON)"))}</>}
-      </>}
+      </div></div>}
 
       {activeTab === "security" && <>
-        {fields.security === "none" && <div className="admin-form-wide admin-form-note">{text("当前不启用传输加密，下面的 TLS 与 REALITY 字段会被忽略。", "No transport encryption is enabled; the TLS and REALITY fields below are ignored.")}</div>}
-        {fields.security === "tls" && <>{field("tlsSni", text("TLS 服务器名（SNI）", "TLS server name (SNI)"))}{field("tlsAlpn", text("ALPN（逗号分隔）", "ALPN (comma separated)"))}{field("tlsCipherSuites", text("密码套件（逗号分隔）", "Cipher suites (comma separated)"))}{selectField("tlsMinVersion", text("最低 TLS 版本", "Minimum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}{selectField("tlsMaxVersion", text("最高 TLS 版本", "Maximum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}{field("tlsFingerprint", text("uTLS 指纹", "uTLS fingerprint"), { placeholder: "chrome" })}{field("tlsCurves", text("曲线（逗号分隔）", "Curves (comma separated)"))}{checkField("tlsRejectUnknownSni", text("拒绝未知 SNI", "Reject unknown SNI"))}{checkField("tlsDisableSystemRoot", text("禁用系统根证书", "Disable system root"))}{field("tlsSessionResumption", text("会话恢复密钥", "Session resumption key"))}{field("tlsMasterKeyLog", text("主密钥日志路径", "Master key log"))}{field("tlsCertFile", text("证书文件路径", "Certificate file path"))}{field("tlsKeyFile", text("私钥文件路径", "Private key file path"))}{areaField("tlsCertPem", text("证书内容（PEM，可选）", "Certificate PEM (optional)"))}{areaField("tlsKeyPem", text("私钥内容（PEM，可选）", "Private key PEM (optional)"))}{selectField("tlsCertUsage", text("证书用途", "Certificate usage"), withDefault(certificateUsages.map((value): [string, string] => [value, value])))}{checkField("tlsCertOcspStapling", text("启用 OCSP 装订", "OCSP stapling"))}{checkField("tlsCertOneTimeLoading", text("仅加载一次", "One-time loading"))}{checkField("tlsCertBuildChain", text("构建证书链", "Build chain"))}{areaField("tlsCertificates", text("多证书（JSON 数组，优先使用）", "Additional certificates (JSON array, takes precedence)"))}{areaField("tlsEchSockopt", text("ECH sockopt（JSON）", "ECH sockopt (JSON)"))}</>}
-        {fields.security === "reality" && <>{field("realityDest", text("REALITY 目标地址", "REALITY destination"), { placeholder: "www.example.com:443" })}{field("realitySni", text("REALITY 服务器名（逗号分隔）", "REALITY server names (comma separated)"))}{field("realityPrivateKey", text("REALITY 私钥", "REALITY private key"))}{field("realityPublicKey", text("REALITY 公钥", "REALITY public key"))}{field("realityShortIds", text("Short ID（逗号分隔）", "Short IDs (comma separated)"))}{selectField("realityFingerprint", text("uTLS 指纹", "uTLS fingerprint"), [["chrome", "Chrome"], ["firefox", "Firefox"], ["safari", "Safari"], ["ios", "iOS"], ["android", "Android"], ["edge", "Edge"], ["random", "Random"]])}{field("realitySpiderX", text("SpiderX 路径", "SpiderX path"))}{field("realityXver", text("Xver 版本", "Xver"), { type: "number", min: 0, max: 2, step: 1 })}{field("realityMinClientVer", text("最低客户端版本", "Minimum client version"))}{field("realityMaxClientVer", text("最高客户端版本", "Maximum client version"))}{field("realityMaxTimediff", text("最大时间差（毫秒）", "Maximum time difference (ms)"), { type: "number", min: 0, step: 1 })}{field("realityMldsa65Seed", text("ML-DSA-65 种子", "ML-DSA-65 seed"))}{field("realityMldsa65Verify", text("ML-DSA-65 校验", "ML-DSA-65 verify"))}{checkField("realityShow", text("在日志中显示调试信息", "Show debug output"))}</>}
+        {fields.security === "none" && <div className="admin-form-block"><div className="admin-form-note">{text("当前不启用传输加密，TLS 与 REALITY 参数会被忽略。", "No transport encryption is enabled; TLS and REALITY settings are ignored.")}</div></div>}
+        {fields.security === "tls" && <>
+          {formSection(text("TLS 基础", "TLS basics"), <>
+            {field("tlsSni", text("TLS 服务器名（SNI）", "TLS server name (SNI)"))}
+            {field("tlsAlpn", text("ALPN（逗号分隔）", "ALPN (comma separated)"))}
+            {field("tlsCipherSuites", text("密码套件（逗号分隔）", "Cipher suites (comma separated)"))}
+            {field("tlsCurves", text("曲线（逗号分隔）", "Curves (comma separated)"))}
+            {selectField("tlsMinVersion", text("最低 TLS 版本", "Minimum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}
+            {selectField("tlsMaxVersion", text("最高 TLS 版本", "Maximum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}
+            {field("tlsFingerprint", text("uTLS 指纹", "uTLS fingerprint"), { placeholder: "chrome" })}
+            {field("tlsSessionResumption", text("会话恢复密钥", "Session resumption key"))}
+            {field("tlsMasterKeyLog", text("主密钥日志路径", "Master key log"))}
+            {checkField("tlsRejectUnknownSni", text("拒绝未知 SNI", "Reject unknown SNI"))}
+            {checkField("tlsDisableSystemRoot", text("禁用系统根证书", "Disable system root"))}
+          </>)}
+          {formSection(text("证书", "Certificates"), <>
+            {field("tlsCertFile", text("证书文件路径", "Certificate file path"))}
+            {field("tlsKeyFile", text("私钥文件路径", "Private key file path"))}
+            {selectField("tlsCertUsage", text("证书用途", "Certificate usage"), withDefault(certificateUsages.map((value): [string, string] => [value, value])))}
+            {areaField("tlsCertPem", text("证书内容（PEM，可选）", "Certificate PEM (optional)"))}
+            {areaField("tlsKeyPem", text("私钥内容（PEM，可选）", "Private key PEM (optional)"))}
+            {checkField("tlsCertOcspStapling", text("启用 OCSP 装订", "OCSP stapling"))}
+            {checkField("tlsCertOneTimeLoading", text("仅加载一次", "One-time loading"))}
+            {checkField("tlsCertBuildChain", text("构建证书链", "Build chain"))}
+            {areaField("tlsCertificates", text("多证书（JSON 数组，优先使用）", "Additional certificates (JSON array, takes precedence)"))}
+          </>)}
+          {formSection(text("高级", "Advanced"), <>
+            {areaField("tlsEchSockopt", text("ECH sockopt（JSON）", "ECH sockopt (JSON)"))}
+          </>)}
+        </>}
+        {fields.security === "reality" && formSection("REALITY", <>
+          {field("realityDest", text("REALITY 目标地址", "REALITY destination"), { placeholder: "www.example.com:443" })}
+          {field("realitySni", text("REALITY 服务器名（逗号分隔）", "REALITY server names (comma separated)"))}
+          {field("realityPrivateKey", text("REALITY 私钥", "REALITY private key"))}
+          {field("realityPublicKey", text("REALITY 公钥", "REALITY public key"))}
+          {field("realityShortIds", text("Short ID（逗号分隔）", "Short IDs (comma separated)"))}
+          {selectField("realityFingerprint", text("uTLS 指纹", "uTLS fingerprint"), [["chrome", "Chrome"], ["firefox", "Firefox"], ["safari", "Safari"], ["ios", "iOS"], ["android", "Android"], ["edge", "Edge"], ["random", "Random"]])}
+          {field("realitySpiderX", text("SpiderX 路径", "SpiderX path"))}
+          {field("realityXver", text("Xver 版本", "Xver"), { type: "number", min: 0, max: 2, step: 1 })}
+          {field("realityMinClientVer", text("最低客户端版本", "Minimum client version"))}
+          {field("realityMaxClientVer", text("最高客户端版本", "Maximum client version"))}
+          {field("realityMaxTimediff", text("最大时间差（毫秒）", "Maximum time difference (ms)"), { type: "number", min: 0, step: 1 })}
+          {field("realityMldsa65Seed", text("ML-DSA-65 种子", "ML-DSA-65 seed"))}
+          {field("realityMldsa65Verify", text("ML-DSA-65 校验", "ML-DSA-65 verify"))}
+          {checkField("realityShow", text("在日志中显示调试信息", "Show debug output"))}
+        </>)}
       </>}
 
-      {activeTab === "sniffing" && <>
+      {activeTab === "sniffing" && formSection(text("嗅探参数", "Sniffing options"), <>
         {checkField("sniffEnabled", text("启用流量嗅探", "Enable sniffing"))}
-        {checkListField("sniffDest", inboundSniffTargets, text("嗅探目标", "Sniffing targets"))}
         {checkField("sniffMetadataOnly", text("仅元数据", "Metadata only"))}
         {checkField("sniffRouteOnly", text("仅用于路由", "Route only"))}
+        {checkListField("sniffDest", inboundSniffTargets, text("嗅探目标", "Sniffing targets"))}
         {field("sniffDomainsExcluded", text("排除域名（逗号分隔）", "Excluded domains (comma separated)"))}
         {field("sniffIpsExcluded", text("排除 IP（逗号分隔）", "Excluded IPs (comma separated)"))}
-      </>}
+      </>)}
 
       {activeTab === "advanced" && <>
-        {checkField("sockTcpFastOpen", "tcpFastOpen")}
-        {checkField("sockTcpNoDelay", "tcpNoDelay")}
-        {checkField("sockTcpMptcp", "tcpMptcp")}
-        {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
-        {field("sockTcpKeepAliveIdle", "tcpKeepAliveIdle", { type: "number", min: 0, step: 1 })}
-        {field("sockTcpKeepAliveInterval", "tcpKeepAliveInterval", { type: "number", min: 0, step: 1 })}
-        {field("sockTcpUserTimeout", "tcpUserTimeout", { type: "number", min: 0, step: 1 })}
-        {field("sockTcpWindowClamp", "tcpWindowClamp", { type: "number", min: 0, step: 1 })}
-        {field("sockTcpMaxSeg", "tcpMaxSeg", { type: "number", min: 0, step: 1 })}
-        {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
-        {selectField("sockDomainStrategy", text("域名解析策略", "Domain strategy"), withDefault(domainStrategies.map((value): [string, string] => [value, value])))}
-        {field("sockDialerProxy", "dialerProxy")}
-        {field("sockInterface", text("网卡名称", "Network interface"))}
-        {field("sockMark", "mark", { type: "number", min: 0, step: 1 })}
-        {field("sockHappyEyeballsTryDelayMs", "happyEyeballs.tryDelayMs", { type: "number", min: 0, step: 1 })}
-        {checkField("sockHappyEyeballsPrioritizeIPv4", "happyEyeballs.prioritizeIPv4")}
-        {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
-        {field("sockHappyEyeballsMaxConcurrentTry", "happyEyeballs.maxConcurrentTry", { type: "number", min: 0, step: 1 })}
-        {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
-        {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
-        {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
-        {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
+        {formSection(text("Socket 参数", "Socket options"), <>
+          {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
+          {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
+          {selectField("sockDomainStrategy", text("域名解析策略", "Domain strategy"), withDefault(domainStrategies.map((value): [string, string] => [value, value])))}
+          {field("sockDialerProxy", "dialerProxy")}
+          {field("sockInterface", text("网卡名称", "Network interface"))}
+          {field("sockMark", "mark", { type: "number", min: 0, step: 1 })}
+          {field("sockTcpKeepAliveIdle", "tcpKeepAliveIdle", { type: "number", min: 0, step: 1 })}
+          {field("sockTcpKeepAliveInterval", "tcpKeepAliveInterval", { type: "number", min: 0, step: 1 })}
+          {field("sockTcpUserTimeout", "tcpUserTimeout", { type: "number", min: 0, step: 1 })}
+          {field("sockTcpWindowClamp", "tcpWindowClamp", { type: "number", min: 0, step: 1 })}
+          {field("sockTcpMaxSeg", "tcpMaxSeg", { type: "number", min: 0, step: 1 })}
+          {field("sockHappyEyeballsTryDelayMs", "happyEyeballs.tryDelayMs", { type: "number", min: 0, step: 1 })}
+          {field("sockHappyEyeballsMaxConcurrentTry", "happyEyeballs.maxConcurrentTry", { type: "number", min: 0, step: 1 })}
+          {checkField("sockTcpFastOpen", "tcpFastOpen")}
+          {checkField("sockTcpNoDelay", "tcpNoDelay")}
+          {checkField("sockTcpMptcp", "tcpMptcp")}
+          {checkField("sockHappyEyeballsPrioritizeIPv4", "happyEyeballs.prioritizeIPv4")}
+          {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
+          {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
+        </>)}
+        {formSection(text("最终掩码", "Final masks"), <>
+          {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
+          {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
+        </>)}
+        {formSection(text("原始配置", "Raw config"), <>
+          {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
+        </>)}
       </>}
-      </div>
       </div>
     </>}
     {kind === "user" && (initial ? <>
@@ -1331,19 +1390,94 @@ function PageToolbar({ t, count, action }: { t: TextFn; count: string; action?: 
 
 function NodesPage({ t, locale, rows, admin, onClearSearch, onEdit, onToggle, onTest }: { t: TextFn; locale: Locale; rows: DisplayNode[]; admin: boolean; onClearSearch: () => void; onEdit: (nodeId: string) => void; onToggle: (nodeId: string, enabled: boolean) => void; onTest: (nodeId: string) => void }) {
   const regionLabel = say(locale, "区域", "Region");
+  const inboundLabel = say(locale, "入站", "Inbounds");
+  const checkedLabel = say(locale, "最后检查", "Last checked");
   const headers = admin
-    ? [t("nodes"), regionLabel, say(locale, "入站", "Inbounds"), say(locale, "最后检查", "Last checked"), t("status"), ""]
+    ? [t("nodes"), regionLabel, inboundLabel, checkedLabel, t("status"), ""]
     : [t("nodes"), regionLabel, t("multiplier"), t("status")];
-  return <div className="panel data-panel"><PageToolbar t={t} count={phrase(locale, "{n} 个节点", "{n} nodes", { n: rows.length })} /><div className="table-wrap full-table node-table"><table><thead><tr>{headers.map((header, index) => <th key={`${header}-${index}`}>{header}</th>)}</tr></thead><tbody>{rows.length ? rows.map((node) => <tr key={node.name}><td><div className="table-person"><span className={`node-flag ${node.color}`}>{node.flag}</span><span><b>{node.name}</b><small>{node.address ?? "—"}</small></span></div></td><td>{node.region || "—"}</td>{admin ? <><td>{node.inbounds ?? "—"}</td><td>{node.checkedAt ?? "—"}</td></> : <td><span className="multiplier-chip"><Zap size={11} />{node.multiplier}</span></td>}<td><span className={`status-chip ${node.state === "offline" ? "pending" : ""}`}><i />{node.state === "online" ? t("online") : node.state === "offline" ? t("offline") : "—"}</span></td>{admin && <td><div className="row-actions">{node.id ? <><button className="quiet-icon" title={say(locale, "连通性测试", "Test connection")} aria-label={say(locale, "连通性测试", "Test connection")} onClick={() => onTest(node.id!)}><Activity size={15} /></button><button className="quiet-icon" title={t("edit")} aria-label={t("edit")} onClick={() => onEdit(node.id!)}><Pencil size={14} /></button><button className={`quiet-icon ${node.enabled ? "" : "danger"}`} title={node.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")} aria-label={node.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")} onClick={() => onToggle(node.id!, !node.enabled)}><Power size={15} /></button></> : null}</div></td>}</tr>) : <tr><td colSpan={headers.length}><div className="empty-state"><Network size={24} /><b>{t("noResults")}</b><button className="text-link" onClick={onClearSearch}>{t("clearSearch")}</button></div></td></tr>}</tbody></table></div><div className="node-list-foot"><span><i /> {t("statusGood")}</span><span>{t("refreshSoon")}</span></div></div>;
+  return <div className="panel data-panel">
+    <PageToolbar t={t} count={phrase(locale, "{n} 个节点", "{n} nodes", { n: rows.length })} />
+    <div className="table-wrap full-table node-table">
+      <table>
+        <thead><tr>{headers.map((header, index) => <th key={`${header}-${index}`}>{header}</th>)}</tr></thead>
+        <tbody>
+          {rows.length ? rows.map((node) => <tr key={node.name}>
+            <td className="cell-title"><div className="table-person"><span className={`node-flag ${node.color}`}>{node.flag}</span><span><b>{node.name}</b><small>{node.address ?? "—"}</small></span></div></td>
+            <td data-label={regionLabel}>{node.region || "—"}</td>
+            {admin
+              ? <><td data-label={inboundLabel}>{node.inbounds ?? "—"}</td><td data-label={checkedLabel}>{node.checkedAt ?? "—"}</td></>
+              : <td data-label={t("multiplier")}><span className="multiplier-chip"><Zap size={11} />{node.multiplier}</span></td>}
+            <td data-label={t("status")}><span className={`status-chip ${node.state === "offline" ? "pending" : ""}`}><i />{node.state === "online" ? t("online") : node.state === "offline" ? t("offline") : "—"}</span></td>
+            {admin && <td className="cell-actions" data-label="">
+              <div className="row-actions">{node.id ? <>
+                <button className="quiet-icon" title={say(locale, "连通性测试", "Test connection")} aria-label={say(locale, "连通性测试", "Test connection")} onClick={() => onTest(node.id!)}><Activity size={15} /></button>
+                <button className="quiet-icon" title={t("edit")} aria-label={t("edit")} onClick={() => onEdit(node.id!)}><Pencil size={14} /></button>
+                <button className={`quiet-icon ${node.enabled ? "" : "danger"}`} title={node.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")} aria-label={node.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")} onClick={() => onToggle(node.id!, !node.enabled)}><Power size={15} /></button>
+              </> : null}</div>
+            </td>}
+          </tr>) : <tr><td colSpan={headers.length}><div className="empty-state"><Network size={24} /><b>{t("noResults")}</b><button className="text-link" onClick={onClearSearch}>{t("clearSearch")}</button></div></td></tr>}
+        </tbody>
+      </table>
+    </div>
+    <div className="node-list-foot"><span><i /> {t("statusGood")}</span><span>{t("refreshSoon")}</span></div>
+  </div>;
 }
 function UsersPage({ t, locale, rows, onEdit, onAdjust, onToggle }: { t: TextFn; locale: Locale; rows: AdminUserRow[]; onEdit: (userId: string) => void; onAdjust: (userId: string) => void; onToggle: (userId: string, enabled: boolean) => void }) {
-  return <div className="panel data-panel"><PageToolbar t={t} count={phrase(locale, "{n} 个用户", "{n} users", { n: rows.length })} /><div className="table-wrap full-table"><table><thead><tr><th><input type="checkbox" aria-label={say(locale, "全选", "Select all")} /></th><th>{t("customer")}</th><th>{t("role")}</th><th>{t("plan")}</th><th>{t("usage")}</th><th>{t("created")}</th><th>{t("status")}</th><th /></tr></thead><tbody>{rows.map((user) => <tr key={user.id}><td><input type="checkbox" aria-label={phrase(locale, "选择 {n}", "Select {n}", { n: user.name })} /></td><td><div className="table-person"><span className={`avatar avatar-${user.color}`}>{user.initials}</span><span><b>{user.name}</b><small>{user.email}</small></span></div></td><td><span className="role-chip">{user.role}</span></td><td>{user.plan}</td><td><span className="usage-number">{user.usage}</span></td><td>{user.date}</td><td><span className={`status-chip ${user.state === "active" ? "" : "pending"}`}><i />{user.state === "active" ? t("active") : user.state === "expired" ? t("expired") : t("disabled")}</span></td><td><button className="outline-button small" onClick={() => onEdit(user.id)}>{t("edit")}</button> <button className="outline-button small" onClick={() => onAdjust(user.id)}>{say(locale, "充值 / 退款", "Credit / refund")}</button> <button className="outline-button small" onClick={() => onToggle(user.id, !user.enabled)}>{user.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></td></tr>)}</tbody></table>{!rows.length && <div className="empty-state"><Search size={24} /><b>{t("noResults")}</b></div>}</div></div>;
+  return <div className="panel data-panel">
+    <PageToolbar t={t} count={phrase(locale, "{n} 个用户", "{n} users", { n: rows.length })} />
+    <div className="table-wrap full-table">
+      <table>
+        <thead><tr><th className="bulk-col"><input type="checkbox" aria-label={say(locale, "全选", "Select all")} /></th><th>{t("customer")}</th><th>{t("role")}</th><th>{t("plan")}</th><th>{t("usage")}</th><th>{t("created")}</th><th>{t("status")}</th><th /></tr></thead>
+        <tbody>
+          {rows.map((user) => <tr key={user.id}>
+            <td className="bulk-col" data-label=""><input type="checkbox" aria-label={phrase(locale, "选择 {n}", "Select {n}", { n: user.name })} /></td>
+            <td className="cell-title"><div className="table-person"><span className={`avatar avatar-${user.color}`}>{user.initials}</span><span><b>{user.name}</b><small>{user.email}</small></span></div></td>
+            <td data-label={t("role")}><span className="role-chip">{user.role}</span></td>
+            <td data-label={t("plan")}>{user.plan}</td>
+            <td data-label={t("usage")}><span className="usage-number">{user.usage}</span></td>
+            <td data-label={t("created")}>{user.date}</td>
+            <td data-label={t("status")}><span className={`status-chip ${user.state === "active" ? "" : "pending"}`}><i />{user.state === "active" ? t("active") : user.state === "expired" ? t("expired") : t("disabled")}</span></td>
+            <td className="cell-actions" data-label="">
+              <div className="row-actions">
+                <button className="outline-button small" onClick={() => onEdit(user.id)}>{t("edit")}</button>
+                <button className="outline-button small" onClick={() => onAdjust(user.id)}>{say(locale, "充值 / 退款", "Credit / refund")}</button>
+                <button className="outline-button small" onClick={() => onToggle(user.id, !user.enabled)}>{user.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button>
+              </div>
+            </td>
+          </tr>)}
+        </tbody>
+      </table>
+      {!rows.length && <div className="empty-state"><Search size={24} /><b>{t("noResults")}</b></div>}
+    </div>
+  </div>;
 }
-
 function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn; locale: Locale; rows: DisplayInboundRow[]; onEdit: (inboundId: string) => void; onToggle: (inboundId: string, enabled: boolean) => void; onSync: () => void }) {
-  return <div className="panel data-panel"><PageToolbar t={t} count={phrase(locale, "{n} 个入站", "{n} inbounds", { n: rows.length })} action={<button className="outline-button small" type="button" onClick={onSync}>{say(locale, "从节点同步", "Sync from node")}</button>} /><div className="table-wrap full-table"><table><thead><tr><th>{t("inbounds")}</th><th>{t("nodes")}</th><th>{t("level")}</th><th>{t("multiplierLabel")}</th><th>{t("clientCount")}</th><th>{t("status")}</th><th /></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><div className="table-person"><span className="inbound-symbol"><Network size={16} /></span><span><b>{row.name}</b><small>{row.address}</small></span></div></td><td>{row.node}</td><td><span className="role-chip">{row.level}</span>{!row.planEnabled && <span className="role-chip">{say(locale, "未对套餐启用", "No plan")}</span>}</td><td><span className="multiplier-chip"><Zap size={12} />{row.multiplier}</span></td><td>{row.clients}</td><td><span className={`status-chip ${row.enabled ? "" : "pending"}`}><i />{row.enabled ? t("enabled") : t("disabled")}</span></td><td><button className="outline-button small" onClick={() => onEdit(row.id)}>{t("edit")}</button> <button className="outline-button small" onClick={() => onToggle(row.id, !row.enabled)}>{row.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></td></tr>)}</tbody></table>{!rows.length && <div className="empty-state"><Network size={24} /><b>{t("noResults")}</b></div>}</div></div>;
+  return <div className="panel data-panel">
+    <PageToolbar t={t} count={phrase(locale, "{n} 个入站", "{n} inbounds", { n: rows.length })} action={<button className="outline-button small" type="button" onClick={onSync}>{say(locale, "从节点同步", "Sync from node")}</button>} />
+    <div className="table-wrap full-table">
+      <table>
+        <thead><tr><th>{t("inbounds")}</th><th>{t("nodes")}</th><th>{t("level")}</th><th>{t("multiplierLabel")}</th><th>{t("clientCount")}</th><th>{t("status")}</th><th /></tr></thead>
+        <tbody>
+          {rows.map((row) => <tr key={row.id}>
+            <td className="cell-title"><div className="table-person"><span className="inbound-symbol"><Network size={16} /></span><span><b>{row.name}</b><small>{row.address}</small></span></div></td>
+            <td data-label={t("nodes")}>{row.node}</td>
+            <td data-label={t("level")}><span className="role-chip">{row.level}</span>{!row.planEnabled && <span className="role-chip">{say(locale, "未对套餐启用", "No plan")}</span>}</td>
+            <td data-label={t("multiplierLabel")}><span className="multiplier-chip"><Zap size={12} />{row.multiplier}</span></td>
+            <td data-label={t("clientCount")}>{row.clients}</td>
+            <td data-label={t("status")}><span className={`status-chip ${row.enabled ? "" : "pending"}`}><i />{row.enabled ? t("enabled") : t("disabled")}</span></td>
+            <td className="cell-actions" data-label="">
+              <div className="row-actions">
+                <button className="outline-button small" onClick={() => onEdit(row.id)}>{t("edit")}</button>
+                <button className="outline-button small" onClick={() => onToggle(row.id, !row.enabled)}>{row.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button>
+              </div>
+            </td>
+          </tr>)}
+        </tbody>
+      </table>
+      {!rows.length && <div className="empty-state"><Network size={24} /><b>{t("noResults")}</b></div>}
+    </div>
+  </div>;
 }
-
 function PlansAdmin({ t, locale, plans, onEdit, onToggle }: { t: TextFn; locale: Locale; plans: DisplayPlanRow[]; onEdit: (planId: string) => void; onToggle: (planId: string, enabled: boolean) => void }) {
   return <div className="plans-grid">{plans.map((plan) => <article className={`plan-admin-card ${plan.tone}`} key={plan.id}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Sparkles size={17} /></span><span className={`status-chip ${plan.enabled ? "" : "pending"}`}><i />{plan.enabled ? t("enabled") : t("disabled")}</span></div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("level")}</span><b>{plan.level}</b></div><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div><div><span>{t("users")}</span><b>{plan.users}</b></div></div><button className="outline-button wide" onClick={() => onEdit(plan.id)}>{t("edit")}</button><button className="outline-button wide" onClick={() => onToggle(plan.id, !plan.enabled)}>{plan.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></article>)}</div>;
 }
@@ -1370,9 +1504,32 @@ function orderStatusLabel(status: string, t: TextFn, locale: Locale): string {
 }
 
 function OrdersPage({ t, locale, rows, onDelete, onAction }: { t: TextFn; locale: Locale; rows: DisplayOrderRow[]; onDelete: (orderId: string) => void; onAction: (label: string) => void }) {
-  return <div className="panel data-panel"><PageToolbar t={t} count={phrase(locale, "最近 {n} 笔订单", "{n} recent orders", { n: rows.length })} /><div className="table-wrap full-table"><table><thead><tr><th>{t("orderNo")}</th><th>{t("customer")}</th><th>{t("plan")}</th><th>{t("payment")}</th><th>{t("amount")}</th><th>{t("date")}</th><th>{t("status")}</th><th /></tr></thead><tbody>{rows.map((order) => <tr key={order.id}><td><b className="mono">{order.id}</b></td><td><div className="table-person"><span className="avatar avatar-blue">{order.customer.split(" ").map((word) => word[0]).join("")}</span><span><b>{order.customer}</b><small>{order.email}</small></span></div></td><td>{order.plan}</td><td>{order.method}</td><td><b>{order.amount}</b></td><td>{order.date}</td><td><span className={`status-chip ${order.state === "pending" ? "pending" : ""}`}><i />{orderStatusLabel(order.state, t, locale)}</span></td><td>{order.state === "failed" || order.state === "expired" ? <button className="outline-button small" onClick={() => onDelete(order.id)}>{t("delete")}</button> : <button className="quiet-icon tiny" onClick={() => onAction(t("details"))}><MoreHorizontal size={17} /></button>}</td></tr>)}</tbody></table>{!rows.length && <div className="empty-state"><CreditCard size={24} /><b>{t("noResults")}</b></div>}</div></div>;
+  return <div className="panel data-panel">
+    <PageToolbar t={t} count={phrase(locale, "最近 {n} 笔订单", "{n} recent orders", { n: rows.length })} />
+    <div className="table-wrap full-table">
+      <table>
+        <thead><tr><th>{t("orderNo")}</th><th>{t("customer")}</th><th>{t("plan")}</th><th>{t("payment")}</th><th>{t("amount")}</th><th>{t("date")}</th><th>{t("status")}</th><th /></tr></thead>
+        <tbody>
+          {rows.map((order) => <tr key={order.id}>
+            <td className="cell-title"><b className="mono cell-id" title={order.id}>{order.id}</b></td>
+            <td data-label={t("customer")}><div className="table-person"><span className="avatar avatar-blue">{order.customer.split(" ").map((word) => word[0]).join("")}</span><span><b>{order.customer}</b><small>{order.email}</small></span></div></td>
+            <td data-label={t("plan")}>{order.plan}</td>
+            <td data-label={t("payment")}>{order.method}</td>
+            <td data-label={t("amount")}><b>{order.amount}</b></td>
+            <td data-label={t("date")}>{order.date}</td>
+            <td data-label={t("status")}><span className={`status-chip ${order.state === "pending" ? "pending" : ""}`}><i />{orderStatusLabel(order.state, t, locale)}</span></td>
+            <td className="cell-actions" data-label="">
+              <div className="row-actions">{order.state === "failed" || order.state === "expired"
+                ? <button className="outline-button small" onClick={() => onDelete(order.id)}>{t("delete")}</button>
+                : <button className="quiet-icon tiny" onClick={() => onAction(t("details"))}><MoreHorizontal size={17} /></button>}</div>
+            </td>
+          </tr>)}
+        </tbody>
+      </table>
+      {!rows.length && <div className="empty-state"><CreditCard size={24} /><b>{t("noResults")}</b></div>}
+    </div>
+  </div>;
 }
-
 function SubscriptionPage({ t, locale, subscription, onCopy }: { t: TextFn; locale: Locale; subscription: UserSubscriptionData | null; onCopy: () => void }) {
   return <div className="subscription-layout"><section className="panel subscription-hero"><div className="sub-hero-glow" /><div className="member-card-top"><div className="plan-emblem"><Sparkles size={19} /></div><span className="plan-state"><i /> {subscription?.active ? t("active") : t("expired")}</span></div><span className="section-kicker">{say(locale, "当前套餐", "YOUR CURRENT PLAN")}</span><h2>{subscription?.plan?.name ?? t("planName")}</h2><p>{subscription?.plan?.description ?? t("planDescription")}</p><div className="sub-stat-strip"><div><small>{t("level")}</small><b>{subscription?.plan ? phrase(locale, "等级 {n}", "Level {n}", { n: subscription.plan.level }) : "—"}</b></div><div><small>{t("trafficLimit")}</small><b>{formatBytes(subscription?.traffic.limitBytes ?? 0)}</b></div><div><small>{t("expiry")}</small><b>{subscription?.expiresAt ? formatDate(subscription.expiresAt, locale) : "—"}</b></div><div><small>{t("remaining")}</small><b>{formatBytes(subscription?.traffic.remainingBytes ?? 0)}</b></div></div><div className="sub-actions"><button className="primary-button" onClick={onCopy}><ArrowRight size={15} />{t("copyLink")}</button><span className="sub-hint"><ShieldCheck size={14} /> {t("statusGood")}</span></div></section><section className="panel subscription-settings"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "配置", "CONFIGURATION")}</div><h3>{t("subscriptionLink")}</h3><p>{t("copyLink")}</p></div></div><div className="link-copy-row"><code>{say(locale, "尚未配置订阅链接", "Subscription URL is not configured.")}</code><button className="outline-button small" onClick={onCopy}>{t("copy")}</button></div><div className="client-list">{subscription?.clients.map((client) => <div key={`${client.inboundName}:${client.port}`}><span className="client-logo client-v">{client.protocol.slice(0, 1).toUpperCase()}</span><span><b>{client.inboundName}</b><small>{client.protocol.toUpperCase()} · {client.port} · {client.syncStatus}</small></span><span className={`status-chip ${client.enabled ? "" : "pending"}`}><i />{client.enabled ? t("enabled") : t("offline")}</span></div>)}{!subscription?.clients.length && <div className="empty-state"><Network size={20} /><b>{say(locale, "暂无可用客户端", "No connected clients are available.")}</b></div>}</div></section><section className="panel subscription-note"><span className="quick-icon amber"><CircleHelp size={16} /></span><div><b>{t("support")}</b><p>{t("refreshSoon")}</p></div><ArrowRight size={15} /></section></div>;
 }

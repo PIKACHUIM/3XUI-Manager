@@ -185,3 +185,43 @@
 .admin-form-inline{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
 .admin-form-inline .admin-form-check{min-height:0}
 @media(max-width:640px){.admin-form-grid.two-col{grid-template-columns:minmax(0,1fr)}}
+/* Phone layout: data tables collapse into cards */
+@media(max-width:760px){
+  .data-panel{overflow:visible}
+  .data-panel .node-table{padding:0}
+  .data-panel .table-wrap{margin:0;width:100%;overflow:visible}
+  .data-panel .table-wrap table{display:block;min-width:0;width:100%;white-space:normal}
+  .data-panel .table-wrap thead{display:none}
+  .data-panel .table-wrap tbody{display:grid;gap:10px;padding:0 2px}
+  .data-panel .table-wrap tbody tr{display:block;padding:13px 15px;border:1px solid var(--border);border-radius:13px;background:var(--surface-soft)}
+  .data-panel .table-wrap tbody tr:hover{background:var(--surface-soft)}
+  .data-panel .table-wrap tbody td{display:flex;align-items:center;justify-content:space-between;gap:14px;width:auto;padding:5px 0;border:0;font-size:10px;white-space:normal}
+  .data-panel .table-wrap tbody td::before{content:attr(data-label);flex:none;color:var(--text-muted);font-size:9px}
+  .data-panel .table-wrap tbody td[data-label=""]::before,.data-panel .table-wrap tbody td:not([data-label])::before{display:none}
+  .data-panel .table-wrap tbody td.cell-title{display:block;padding:0 0 10px;margin-bottom:6px;border-bottom:1px solid var(--border)}
+  .data-panel .table-wrap tbody td.cell-title::before{display:none}
+  .data-panel .table-wrap tbody td.cell-title b{font-size:11px}
+  .data-panel .table-wrap tbody td.cell-title .cell-id{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .data-panel .table-wrap tbody td.cell-actions{display:block;padding:10px 0 0;margin-top:6px;border-top:1px solid var(--border)}
+  .data-panel .table-wrap tbody td.cell-actions .row-actions{flex-wrap:wrap;justify-content:flex-end;gap:6px}
+  .data-panel .table-wrap tbody td.cell-actions .outline-button{flex:0 1 auto}
+  .data-panel .table-wrap tbody td.bulk-col{display:none}
+  .data-panel .table-wrap tbody td[colspan]{display:block;padding:0}
+  .data-panel .table-wrap tbody td[colspan]::before{display:none}
+  .data-panel .table-wrap .empty-state{padding:22px 0}
+}
+/* Inbound editor sections + switch rows */
+.admin-form-tabpanel{display:grid;gap:14px}
+.admin-form-tabpanel>.admin-form-grid{gap:12px}
+.admin-form-grid .admin-form-check{grid-column:1/-1}
+.admin-form-check{display:flex;flex-direction:row-reverse;align-items:center;justify-content:space-between;gap:10px;min-height:32px;color:var(--text-secondary);font-size:11px}
+.admin-form-check input[type=checkbox]{appearance:none;-webkit-appearance:none;flex:none;width:36px;height:20px;margin:0;border:0;border-radius:999px;background:var(--border);position:relative;cursor:pointer;transition:background .15s}
+.admin-form-check input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0003;transition:transform .15s}
+.admin-form-check input[type=checkbox]:checked{background:var(--accent)}
+.admin-form-check input[type=checkbox]:checked::after{transform:translateX(16px)}
+.admin-form-check input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[dir=rtl] .admin-form-check input[type=checkbox]::after{left:auto;right:3px}
+[dir=rtl] .admin-form-check input[type=checkbox]:checked::after{transform:translateX(-16px)}
+.admin-form-block .admin-form-note{font-size:10.5px}
+.admin-form-tabs button{flex:0 1 auto;min-width:92px}
+@media(max-width:640px){.admin-form-tabs button{min-width:0;padding:0 10px;font-size:10px}.admin-form-block{padding:12px 12px 14px}}
