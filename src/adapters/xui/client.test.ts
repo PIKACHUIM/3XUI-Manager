@@ -197,10 +197,19 @@ describe("ThreeXuiClient login", () => {
     expect(calls.at(-1)?.url).toBe("http://43.226.62.230.nip.io:61090/panel/api/inbounds/list");
   });
 
-  it("points at the firewall when Cloudflare cannot reach the panel", async () => {
+  it("asks for HTTPS when Cloudflare gets an empty plain HTTP reply", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       capture(input, init, []);
       return new Response("error code: 520\n", { status: 520, headers: { "content-type": "text/plain; charset=UTF-8" } });
+    }));
+
+    await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/serve the panel over HTTPS/);
+  });
+
+  it("points at the firewall when Cloudflare cannot open a connection", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capture(input, init, []);
+      return new Response("error code: 521\n", { status: 521, headers: { "content-type": "text/plain; charset=UTF-8" } });
     }));
 
     await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/check its firewall/);
