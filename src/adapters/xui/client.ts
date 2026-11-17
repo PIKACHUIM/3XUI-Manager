@@ -74,6 +74,14 @@ function readSessionCookie(response: Response): string | null {
   return pairs.length ? pairs.join("; ") : null;
 }
 
+/** Explains a failed panel call, including status and content type when the body carries no message. */
+function describePanelFailure(response: Response, payload: XuiEnvelope<unknown>): string {
+  const status = `HTTP ${response.status}`;
+  if (typeof payload.msg === "string" && payload.msg && payload.msg !== "non-JSON response") return `${payload.msg.slice(0, 180)} (${status})`;
+  const type = response.headers.get("content-type")?.split(";")[0]?.trim() || "no content-type";
+  return `${status}, ${type}`;
+}
+
 /** Builds the 3X-UI add/update payload, keeping unknown top-level config keys. */
 export function inboundPayload(inbound: Inbound): Record<string, unknown> {
   const { settings, streamSettings, sniffing, ...extra } = inbound.config;
@@ -106,6 +114,7 @@ export class ThreeXuiClient {
   private readonly origin: URL;
   private cookie: string | null = null;
   private bearer: string | null = null;
+  private csrf: string | null = null;
 
   private constructor(private readonly env: RuntimeEnv, private readonly node: NodeRecord, private readonly password: string, private readonly token: string | null) {
     this.origin = validatePanelUrl(node.panelUrl);
@@ -137,59 +146,96 @@ export class ThreeXuiClient {
   /**
    * 3X-UI binds the login body either as a form or as JSON depending on the build,
    * so send the form encoding first and fall back to JSON when the panel answers success:false.
+   * Builds from 2.6 on also require a CSRF token bound to the session cookie, otherwise
+   * `/login` answers with an empty 403 instead of JSON.
    */
   private async login(): Promise<void> {
+    await this.refreshCsrf();
     const attempts: Array<[string, string]> = [
       ["application/x-www-form-urlencoded", new URLSearchParams({ username: this.node.username, password: this.password }).toString()],
       ["application/json", JSON.stringify({ username: this.node.username, password: this.password })],
     ];
     const errors: string[] = [];
+    let csrfRetried = false;
     for (const [contentType, body] of attempts) {
-      let response: Response;
-      try {
-        response = await fetch(new URL(`${this.basePath()}/login`, this.origin), {
-          method: "POST",
-          headers: { "Content-Type": contentType, Accept: "application/json" },
-          body,
-          redirect: "manual",
-          signal: AbortSignal.timeout(8000),
-        });
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : "network error");
-        continue;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let response: Response;
+        try {
+          const headers = new Headers({ "Content-Type": contentType, Accept: "application/json", "X-Requested-With": "XMLHttpRequest" });
+          if (this.cookie) headers.set("Cookie", this.cookie);
+          if (this.csrf) headers.set("X-CSRF-Token", this.csrf);
+          response = await fetch(new URL(`${this.basePath()}/login`, this.origin), { method: "POST", headers, body, signal: AbortSignal.timeout(8000) });
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : "network error");
+          break;
+        }
+        const cookie = readSessionCookie(response);
+        const payload = await this.readEnvelope<unknown>(response);
+        if (response.ok && payload.success !== false) {
+          if (cookie) this.cookie = cookie;
+          if (!this.cookie) throw new Error("3X-UI accepted the login but returned no session cookie; configure an API token for this node.");
+          await this.refreshCsrf();
+          return;
+        }
+        if (response.status === 403 && !csrfRetried) {
+          csrfRetried = true;
+          await this.refreshCsrf();
+          continue;
+        }
+        errors.push(describePanelFailure(response, payload));
+        break;
       }
-      const cookie = readSessionCookie(response);
-      const payload = await this.readEnvelope<unknown>(response);
-      if (response.ok && payload.success !== false) {
-        if (!cookie) throw new Error("3X-UI accepted the login but returned no session cookie; configure an API token for this node.");
-        this.cookie = cookie;
-        return;
-      }
-      const message = (payload.msg || `HTTP ${response.status}`).slice(0, 180);
-      errors.push(message);
-      if (response.status === 401 || response.status === 403) break;
     }
-    throw new Error(`3X-UI login failed: ${errors[0] ?? "unknown error"}`);
+    throw new Error(`3X-UI login failed: ${[...new Set(errors)].join(" / ") || "unknown error"}`);
+  }
+
+  /** Fetches the CSRF token newer panels bind to the session cookie; older panels simply have no such endpoint. */
+  private async refreshCsrf(): Promise<void> {
+    try {
+      const headers = new Headers({ Accept: "application/json", "X-Requested-With": "XMLHttpRequest" });
+      if (this.cookie) headers.set("Cookie", this.cookie);
+      const response = await fetch(new URL(`${this.basePath()}/csrf-token`, this.origin), { headers, signal: AbortSignal.timeout(8000) });
+      if (!response.ok) return;
+      const cookie = readSessionCookie(response);
+      if (cookie) this.cookie = cookie;
+      const payload = await this.readEnvelope<string>(response);
+      if (typeof payload.obj === "string" && payload.obj) this.csrf = payload.obj;
+    } catch {
+      this.csrf = null;
+    }
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<XuiEnvelope<T>> {
     const send = async (): Promise<Response> => {
       const headers = new Headers(init.headers);
       headers.set("Accept", "application/json");
+      headers.set("X-Requested-With", "XMLHttpRequest");
       if (this.bearer) headers.set("Authorization", `Bearer ${this.bearer}`);
       if (this.cookie) headers.set("Cookie", this.cookie);
+      if (!this.bearer && this.csrf) headers.set("X-CSRF-Token", this.csrf);
       return fetch(new URL(`${this.basePath()}${path}`, this.origin), { ...init, headers, signal: AbortSignal.timeout(10000) });
     };
     let response = await send();
-    if ((response.status === 401 || response.status === 403) && this.bearer && this.password) {
-      this.bearer = null;
-      this.cookie = null;
-      await this.login();
-      response = await send();
+    if (!response.ok && this.password) {
+      if (this.bearer && (response.status === 401 || response.status === 403)) {
+        this.bearer = null;
+        this.cookie = null;
+        this.csrf = null;
+        await this.login();
+        response = await send();
+      } else if (!this.bearer && response.status === 401) {
+        this.cookie = null;
+        this.csrf = null;
+        await this.login();
+        response = await send();
+      } else if (!this.bearer && response.status === 403) {
+        await this.refreshCsrf();
+        response = await send();
+      }
     }
     const payload = await this.readEnvelope<T>(response);
     if (!response.ok || payload.success === false) {
-      throw new Error(`3X-UI request failed (HTTP ${response.status}): ${(payload.msg ?? "panel returned an error").slice(0, 180)}`);
+      throw new Error(`3X-UI request failed: ${describePanelFailure(response, payload)}`);
     }
     return payload;
   }

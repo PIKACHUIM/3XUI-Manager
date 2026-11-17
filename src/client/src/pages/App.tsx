@@ -1015,7 +1015,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       {formSection(text("面板认证", "Panel credentials"), <>
         {field("password", text(initial ? "更换面板密码（留空不变）" : "面板密码", initial ? "Change panel password (blank to keep)" : "Panel password"), { type: "password", autoComplete: "new-password" })}
         {field("apiToken", text(initial ? "更换 API Token（留空不变）" : "API Token", initial ? "Change API token (blank to keep)" : "API token"), { type: "password", autoComplete: "new-password" })}
-        <div className="admin-form-wide admin-form-note">{text("面板密码与 API Token 任选其一；两者都填写时优先使用 API Token。", "Provide either the panel password or an API token; the token takes precedence when both are set.")}</div>
+        <div className="admin-form-wide admin-form-note">{text("面板密码或 API Token 任选其一，两者都填时以 Token 为优先；面板开启两步验证时仅接受 Token。", "Use the panel password or an API token; the token wins when both are set. Panels with two-factor authentication only accept a token.")}</div>
       </>)}
       <div className="admin-form-inline">{checkField("enabled", text("启用节点", "Node enabled"))}</div>
     </>}
