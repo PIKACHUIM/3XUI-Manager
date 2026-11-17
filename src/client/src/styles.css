@@ -176,3 +176,12 @@
 .row-actions .quiet-icon.danger{color:var(--amber)}
 .row-actions .quiet-icon.danger:hover{color:var(--amber)}
 .admin-form-tabs{position:sticky;top:0;z-index:2}
+/* Sectioned admin forms (node / plan / user) */
+.admin-create-panel.is-compact{width:min(680px,100%)}
+.admin-form-stack{display:grid;gap:14px}
+.admin-form-block{padding:14px 14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface-inset)}
+.admin-form-block>h3{margin:0 0 12px;color:var(--text-secondary);font:600 10px var(--font-display);letter-spacing:.09em;text-transform:uppercase}
+.admin-form-grid.two-col{grid-template-columns:repeat(2,minmax(0,1fr))}
+.admin-form-inline{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
+.admin-form-inline .admin-form-check{min-height:0}
+@media(max-width:640px){.admin-form-grid.two-col{grid-template-columns:minmax(0,1fr)}}

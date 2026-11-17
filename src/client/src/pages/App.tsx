@@ -915,6 +915,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   const planEditingDefault = kind === "plan" && initial ? (initial as ApiPlan).isDefault : false;
   const title = initial ? kind === "node" ? text("编辑节点", "Edit node") : kind === "inbound" ? text("编辑入站", "Edit inbound") : kind === "plan" ? text("编辑套餐", "Edit plan") : text("编辑用户", "Edit user") : kind === "node" ? text("添加 3X-UI 节点", "Add 3X-UI node") : kind === "inbound" ? text("添加入站", "Add inbound") : kind === "plan" ? text("添加套餐", "Add plan") : text("添加用户", "Add user");
   const field = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => <label><span>{label}</span><input {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
+  const wideField = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => <label className="admin-form-wide"><span>{label}</span><input {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
   const checkField = (name: string, label: string) => <label className="admin-form-check"><input type="checkbox" checked={fields[name] === true} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.checked }))} /><span>{label}</span></label>;
   const selectField = (name: string, label: string, options: Array<[string, string]>) => <label><span>{label}</span><select value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))}>{options.map(([value, optionLabel]) => <option key={value || "-"} value={value}>{optionLabel}</option>)}</select></label>;
   const withDefault = (options: Array<[string, string]>): Array<[string, string]> => [["", text("默认", "Default")], ...options];
@@ -925,6 +926,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   });
   const areaField = (name: string, label: string, props: React.TextareaHTMLAttributes<HTMLTextAreaElement> = {}) => <label className="admin-form-wide"><span>{label}</span><textarea rows={3} {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
   const checkListField = (name: string, values: readonly string[], label: string) => <fieldset className="admin-node-options"><legend>{label}</legend>{values.map((value) => <label key={value}><input type="checkbox" checked={String(fields[name] ?? "").split(",").includes(value)} onChange={toggleListField(name, value)} /><span>{value.toUpperCase()}</span></label>)}</fieldset>;
+  const formSection = (title: string, body: React.ReactNode) => <section className="admin-form-block"><h3>{title}</h3><div className="admin-form-grid two-col">{body}</div></section>;
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
@@ -979,9 +981,44 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}><section className="panel admin-create-panel" role="dialog" aria-modal="true" aria-labelledby="admin-create-title"><form className="admin-create-form" onSubmit={(event) => { void submit(event); }}><div className="admin-create-heading"><div><div className="section-kicker">{text("管理操作", "ADMIN ACTION")}</div><h2 id="admin-create-title">{title}</h2></div><button className="quiet-icon" type="button" aria-label={text("关闭", "Close")} onClick={onCancel}><X size={17} /></button></div><div className="admin-form-grid">
-    {kind === "plan" && <>{field("name", text("套餐名称", "Plan name"), { required: true, maxLength: 80 })}{field("description", text("描述", "Description"), { maxLength: 500 })}{field("level", text("等级", "Level"), { type: "number", min: 0, step: 1, required: true, disabled: planEditingDefault })}{field("trafficGb", text("流量（十进制 GB）", "Traffic (decimal GB)"), { type: "number", min: 0, step: 0.001, required: true })}{field("validityDays", text("有效天数（0 表示不限期）", "Validity days (0 = no expiry)"), { type: "number", min: 0, step: 1, required: true })}{field("priceMinor", text("价格（最小货币单位）", "Price (minor currency units)"), { type: "number", min: 0, step: 1, required: true, disabled: planEditingDefault })}{field("currency", text("币种", "Currency"), { required: true, minLength: 3, maxLength: 3 })}<label><span>{text("重置周期", "Reset cycle")}</span><select value={String(fields.resetUnit)} onChange={(event) => setFields((current) => ({ ...current, resetUnit: event.target.value }))}><option value="none">{say(locale, "不限", "None")}</option><option value="day">{say(locale, "每日", "Daily")}</option><option value="week">{say(locale, "每周", "Weekly")}</option><option value="month">{say(locale, "每月", "Monthly")}</option><option value="year">{say(locale, "每年", "Yearly")}</option></select></label><label className="admin-form-check"><input type="checkbox" checked={fields.allowPaidUpgrade === true} onChange={(event) => setFields((current) => ({ ...current, allowPaidUpgrade: event.target.checked }))} /><span>{text("允许付费升级", "Allow paid upgrades")}</span></label>{checkField("enabled", text("启用套餐", "Plan enabled"))}{planEditingDefault && <div className="admin-form-wide admin-form-note">{text("默认免费套餐固定等级 0、价格 0，可调整流量与有效期；改动只对之后创建的账户生效，已有账户保留各自额度。", "The default free plan keeps level 0 and price 0. Traffic and validity apply to accounts created afterwards; existing accounts keep their own quota.")}</div>}</>}
-    {kind === "node" && <>{field("name", text("节点名称", "Node name"), { required: true, maxLength: 80 })}{field("region", text("区域", "Region"), { maxLength: 80 })}{field("panelUrl", text("3X-UI 面板 HTTPS URL", "3X-UI panel HTTPS URL"), { type: "url", required: true })}{field("publicAddress", text("公开地址", "Public address"), { maxLength: 255 })}{field("basePath", text("面板基础路径", "Panel base path"), { required: true })}{field("username", text("面板用户名", "Panel username"))}{field("password", text(initial ? "更换面板密码（留空不变）" : "面板密码", initial ? "Change panel password (blank to keep)" : "Panel password"), { type: "password", autoComplete: "new-password" })}{field("apiToken", text(initial ? "更换 API Token（留空不变）" : "或 API Token", initial ? "Change API token (blank to keep)" : "Or API token"), { type: "password", autoComplete: "new-password" })}{checkField("enabled", text("启用节点", "Node enabled"))}</>}
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}><section className={`panel admin-create-panel${kind === "inbound" ? "" : " is-compact"}`} role="dialog" aria-modal="true" aria-labelledby="admin-create-title"><form className="admin-create-form" onSubmit={(event) => { void submit(event); }}><div className="admin-create-heading"><div><div className="section-kicker">{text("管理操作", "ADMIN ACTION")}</div><h2 id="admin-create-title">{title}</h2></div><button className="quiet-icon" type="button" aria-label={text("关闭", "Close")} onClick={onCancel}><X size={17} /></button></div><div className={kind === "inbound" ? "admin-form-grid" : "admin-form-stack"}>
+    {kind === "plan" && <>
+      {formSection(text("基本信息", "Basics"), <>
+        {field("name", text("套餐名称", "Plan name"), { required: true, maxLength: 80 })}
+        {field("level", text("等级", "Level"), { type: "number", min: 0, step: 1, required: true, disabled: planEditingDefault })}
+        {wideField("description", text("描述", "Description"), { maxLength: 500 })}
+      </>)}
+      {formSection(text("流量与价格", "Traffic and price"), <>
+        {field("trafficGb", text("流量（十进制 GB）", "Traffic (decimal GB)"), { type: "number", min: 0, step: 0.001, required: true })}
+        {field("validityDays", text("有效天数（0 表示不限期）", "Validity days (0 = no expiry)"), { type: "number", min: 0, step: 1, required: true })}
+        {field("priceMinor", text("价格（最小货币单位）", "Price (minor currency units)"), { type: "number", min: 0, step: 1, required: true, disabled: planEditingDefault })}
+        {field("currency", text("币种", "Currency"), { required: true, minLength: 3, maxLength: 3 })}
+      </>)}
+      {formSection(text("重置与选项", "Reset and options"), <>
+        <label><span>{text("重置周期", "Reset cycle")}</span><select value={String(fields.resetUnit)} onChange={(event) => setFields((current) => ({ ...current, resetUnit: event.target.value }))}><option value="none">{say(locale, "不限", "None")}</option><option value="day">{say(locale, "每日", "Daily")}</option><option value="week">{say(locale, "每周", "Weekly")}</option><option value="month">{say(locale, "每月", "Monthly")}</option><option value="year">{say(locale, "每年", "Yearly")}</option></select></label>
+        {checkField("allowPaidUpgrade", text("允许付费升级", "Allow paid upgrades"))}
+        {checkField("enabled", text("启用套餐", "Plan enabled"))}
+      </>)}
+      {planEditingDefault && <div className="admin-form-note">{text("默认免费套餐固定等级 0、价格 0，可调整流量与有效期；改动只对之后创建的账户生效，已有账户保留各自额度。", "The default free plan keeps level 0 and price 0. Traffic and validity apply to accounts created afterwards; existing accounts keep their own quota.")}</div>}
+    </>}
+    {kind === "node" && <>
+      {formSection(text("节点信息", "Node details"), <>
+        {field("name", text("节点名称", "Node name"), { required: true, maxLength: 80 })}
+        {field("region", text("区域", "Region"), { maxLength: 80 })}
+        {wideField("publicAddress", text("公开地址", "Public address"), { maxLength: 255 })}
+      </>)}
+      {formSection(text("面板连接", "Panel connection"), <>
+        {wideField("panelUrl", text("3X-UI 面板 HTTPS URL", "3X-UI panel HTTPS URL"), { type: "url", required: true, placeholder: "https://panel.example.com:54321" })}
+        {field("basePath", text("面板基础路径", "Panel base path"), { required: true })}
+        {field("username", text("面板用户名", "Panel username"))}
+      </>)}
+      {formSection(text("面板认证", "Panel credentials"), <>
+        {field("password", text(initial ? "更换面板密码（留空不变）" : "面板密码", initial ? "Change panel password (blank to keep)" : "Panel password"), { type: "password", autoComplete: "new-password" })}
+        {field("apiToken", text(initial ? "更换 API Token（留空不变）" : "API Token", initial ? "Change API token (blank to keep)" : "API token"), { type: "password", autoComplete: "new-password" })}
+        <div className="admin-form-wide admin-form-note">{text("面板密码与 API Token 任选其一；两者都填写时优先使用 API Token。", "Provide either the panel password or an API token; the token takes precedence when both are set.")}</div>
+      </>)}
+      <div className="admin-form-inline">{checkField("enabled", text("启用节点", "Node enabled"))}</div>
+    </>}
     {kind === "inbound" && <>
       <div className="admin-form-tabs" role="tablist" aria-label={text("入站设置", "Inbound settings")}>{inboundTabs.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} onClick={() => setActiveTab(key)}>{label}</button>)}</div>
       <div className="admin-form-tabpanel" role="tabpanel">
@@ -1074,7 +1111,25 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       </div>
       </div>
     </>}
-    {kind === "user" && (initial ? <><label><span>{text("邮箱", "Email")}</span><input value={String(fields.email)} readOnly /></label><label><span>{text("账户角色", "Account role")}</span><select value={String(fields.role)} onChange={(event) => setFields((current) => ({ ...current, role: event.target.value }))}><option value="user">{say(locale, "用户", "User")}</option><option value="admin">{say(locale, "管理员", "Admin")}</option></select></label>{field("planExpiresAt", text("套餐到期时间（留空表示不限期）", "Plan expiration (blank = no expiry)"), { type: "datetime-local" })}{checkField("enabled", text("启用账户", "Account enabled"))}</> : <>{field("email", text("邮箱", "Email"), { type: "email", required: true, maxLength: 254, autoComplete: "off" })}{field("userPassword", text("初始密码（至少 12 位）", "Initial password (12+ characters)"), { type: "password", required: true, minLength: 12, maxLength: 256, autoComplete: "new-password" })}<label><span>{text("账户角色", "Account role")}</span><select value={String(fields.role)} onChange={(event) => setFields((current) => ({ ...current, role: event.target.value }))}><option value="user">{say(locale, "用户", "User")}</option><option value="admin">{say(locale, "管理员", "Admin")}</option></select></label><label><span>{text("套餐", "Plan")}</span><select value={String(fields.planId)} onChange={(event) => setFields((current) => ({ ...current, planId: event.target.value }))}><option value="">{text("默认免费套餐", "Default free plan")}</option>{plans.filter((plan) => plan.enabled).map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select></label>{checkField("enabled", text("启用账户", "Account enabled"))}<div className="admin-form-wide admin-form-note">{text("管理员创建的账号会直接标记为邮箱已验证，可立即登录。", "Accounts created by an administrator are marked as email-verified and can sign in immediately.")}</div></>)}
+    {kind === "user" && (initial ? <>
+      {formSection(text("账户信息", "Account"), <>
+        <label><span>{text("邮箱", "Email")}</span><input value={String(fields.email)} readOnly /></label>
+        <label><span>{text("账户角色", "Account role")}</span><select value={String(fields.role)} onChange={(event) => setFields((current) => ({ ...current, role: event.target.value }))}><option value="user">{say(locale, "用户", "User")}</option><option value="admin">{say(locale, "管理员", "Admin")}</option></select></label>
+        {wideField("planExpiresAt", text("套餐到期时间（留空表示不限期）", "Plan expiration (blank = no expiry)"), { type: "datetime-local" })}
+      </>)}
+      <div className="admin-form-inline">{checkField("enabled", text("启用账户", "Account enabled"))}</div>
+    </> : <>
+      {formSection(text("账户信息", "Account"), <>
+        {field("email", text("邮箱", "Email"), { type: "email", required: true, maxLength: 254, autoComplete: "off" })}
+        {field("userPassword", text("初始密码（至少 12 位）", "Initial password (12+ characters)"), { type: "password", required: true, minLength: 12, maxLength: 256, autoComplete: "new-password" })}
+      </>)}
+      {formSection(text("角色与套餐", "Role and plan"), <>
+        <label><span>{text("账户角色", "Account role")}</span><select value={String(fields.role)} onChange={(event) => setFields((current) => ({ ...current, role: event.target.value }))}><option value="user">{say(locale, "用户", "User")}</option><option value="admin">{say(locale, "管理员", "Admin")}</option></select></label>
+        <label><span>{text("套餐", "Plan")}</span><select value={String(fields.planId)} onChange={(event) => setFields((current) => ({ ...current, planId: event.target.value }))}><option value="">{text("默认免费套餐", "Default free plan")}</option>{plans.filter((plan) => plan.enabled).map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select></label>
+      </>)}
+      <div className="admin-form-inline">{checkField("enabled", text("启用账户", "Account enabled"))}</div>
+      <div className="admin-form-note">{text("管理员创建的账号会直接标记为邮箱已验证，可立即登录。", "Accounts created by an administrator are marked as email-verified and can sign in immediately.")}</div>
+    </>)}
   </div>{error && <div className="auth-message error" role="alert">{error}</div>}<div className="admin-form-actions"><button className="outline-button" type="button" onClick={onCancel}>{text("取消", "Cancel")}</button><button className="primary-button" type="submit" disabled={busy}>{busy ? text("正在保存…", "Saving…") : initial ? text("保存", "Save") : text("创建", "Create")}</button></div></form></section></div>;
 }
 
