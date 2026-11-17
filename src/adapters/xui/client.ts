@@ -6,6 +6,8 @@ interface XuiEnvelope<T> {
   success?: boolean;
   msg?: string;
   obj?: T;
+  /** Raw body kept when the panel answered with something other than JSON. */
+  raw?: string;
 }
 
 export interface XuiInbound {
@@ -79,7 +81,8 @@ function describePanelFailure(response: Response, payload: XuiEnvelope<unknown>)
   const status = `HTTP ${response.status}`;
   if (typeof payload.msg === "string" && payload.msg && payload.msg !== "non-JSON response") return `${payload.msg.slice(0, 180)} (${status})`;
   const type = response.headers.get("content-type")?.split(";")[0]?.trim() || "no content-type";
-  return `${status}, ${type}`;
+  const body = payload.raw?.replace(/\s+/g, " ").trim().slice(0, 120) ?? "";
+  return `${status}, ${type}${body ? `: ${body}` : ""}`;
 }
 
 /** True when an endpoint answered with a rendered page instead of the panel's JSON API. */
@@ -88,6 +91,16 @@ function servedMarkup(payload: XuiEnvelope<unknown>): boolean {
 }
 
 const WRONG_ADDRESS = "This address serves a web page, not the 3X-UI API; use the panel address such as http://host:2053.";
+
+/**
+ * Workers cannot open a connection to an IP literal, so Cloudflare answers such a fetch with
+ * 403 "error code: 1003". A hostname that resolves to the same address works normally.
+ */
+function describesBareIpBlock(response: Response, payload: XuiEnvelope<unknown>): boolean {
+  return response.status === 403 && typeof payload.raw === "string" && /error code:\s*1003/i.test(payload.raw);
+}
+
+const BARE_IP_BLOCKED = "Cloudflare Workers cannot fetch a bare IP address. Point a DNS record at the panel (for example panel.example.com) and use that hostname instead of the IP.";
 
 /** Builds the 3X-UI add/update payload, keeping unknown top-level config keys. */
 export function inboundPayload(inbound: Inbound): Record<string, unknown> {
@@ -174,13 +187,14 @@ export class ThreeXuiClient {
           const headers = new Headers({ "Content-Type": contentType, Accept: "application/json", "X-Requested-With": "XMLHttpRequest" });
           if (this.cookie) headers.set("Cookie", this.cookie);
           if (this.csrf) headers.set("X-CSRF-Token", this.csrf);
-          response = await fetch(new URL(`${this.basePath()}/login`, this.origin), { method: "POST", headers, body, signal: AbortSignal.timeout(8000) });
+          response = await fetch(new URL(`${this.basePath()}/login`, this.origin), { method: "POST", headers, body, signal: AbortSignal.timeout(12000) });
         } catch (error) {
           errors.push(error instanceof Error ? error.message : "network error");
           break;
         }
         const cookie = readSessionCookie(response);
         const payload = await this.readEnvelope<unknown>(response);
+        if (describesBareIpBlock(response, payload)) throw new Error(`3X-UI login failed: ${BARE_IP_BLOCKED}`);
         if (response.ok && payload.success !== false) {
           if (servedMarkup(payload)) {
             this.panelServesMarkup = true;
@@ -208,7 +222,7 @@ export class ThreeXuiClient {
     try {
       const headers = new Headers({ Accept: "application/json", "X-Requested-With": "XMLHttpRequest" });
       if (this.cookie) headers.set("Cookie", this.cookie);
-      const response = await fetch(new URL(`${this.basePath()}/csrf-token`, this.origin), { headers, signal: AbortSignal.timeout(8000) });
+      const response = await fetch(new URL(`${this.basePath()}/csrf-token`, this.origin), { headers, signal: AbortSignal.timeout(12000) });
       if (!response.ok) return;
       const cookie = readSessionCookie(response);
       if (cookie) this.cookie = cookie;
@@ -231,7 +245,7 @@ export class ThreeXuiClient {
       if (this.bearer) headers.set("Authorization", `Bearer ${this.bearer}`);
       if (this.cookie) headers.set("Cookie", this.cookie);
       if (!this.bearer && this.csrf) headers.set("X-CSRF-Token", this.csrf);
-      return fetch(new URL(`${this.basePath()}${path}`, this.origin), { ...init, headers, signal: AbortSignal.timeout(10000) });
+      return fetch(new URL(`${this.basePath()}${path}`, this.origin), { ...init, headers, signal: AbortSignal.timeout(15000) });
     };
     let response = await send();
     if (!response.ok && this.password) {
@@ -252,6 +266,7 @@ export class ThreeXuiClient {
       }
     }
     const payload = await this.readEnvelope<T>(response);
+    if (describesBareIpBlock(response, payload)) throw new Error(`3X-UI request failed: ${BARE_IP_BLOCKED}`);
     if (servedMarkup(payload)) throw new Error(`3X-UI request failed: ${WRONG_ADDRESS}`);
     if (!response.ok || payload.success === false) {
       throw new Error(`3X-UI request failed: ${describePanelFailure(response, payload)}`);
@@ -264,8 +279,8 @@ export class ThreeXuiClient {
     try {
       return JSON.parse(raw) as XuiEnvelope<T>;
     } catch {
-      if (response.ok) return { success: true, obj: raw as T };
-      return { success: false, msg: "non-JSON response" };
+      if (response.ok) return { success: true, obj: raw as T, raw };
+      return { success: false, msg: "non-JSON response", raw };
     }
   }
 

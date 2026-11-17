@@ -172,6 +172,15 @@ describe("ThreeXuiClient login", () => {
     await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/not the 3X-UI API/);
   });
 
+  it("explains that Cloudflare cannot fetch a bare IP address", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capture(input, init, []);
+      return new Response("error code: 1003\n", { status: 403, headers: { "content-type": "text/plain; charset=UTF-8" } });
+    }));
+
+    await expect(ThreeXuiClient.connect(env, await makeNode())).rejects.toThrow(/cannot fetch a bare IP address/);
+  });
+
   it("keeps the password as a fallback when the API token is rejected", async () => {
     const calls: Call[] = [];
     let csrfCalls = 0;
