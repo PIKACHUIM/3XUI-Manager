@@ -48,7 +48,7 @@ type AdminCreateKind = "node" | "inbound" | "plan" | "user";
 type AdminEditor = { kind: AdminCreateKind; id?: string };
 type AuthenticatedUser = { id: string; email: string; role: "admin" | "user"; createdAt: string };
 type PublicConfig = { turnstileSiteKey: string | null; registrationTurnstileEnabled: boolean; checkinTurnstileEnabled: boolean };
-type ApiPlan = { id: string; name: string; description: string; group: string; level: number; trafficBytes: number; validityDays: number; priceMinor: number; currency: string; resetUnit: string; resetInterval: number; resetAtHour: number; resetWeekday: number; resetMonthDay: number; enabled: boolean; isDefault: boolean; allowPaidUpgrade: boolean };
+type ApiPlan = { id: string; name: string; description: string; group: string; level: number; trafficBytes: number; validityDays: number; priceMinor: number; currency: string; resetUnit: string; resetInterval: number; resetAtHour: number; resetWeekday: number; resetMonthDay: number; enabled: boolean; isDefault: boolean; allowPaidUpgrade: boolean; hidden?: boolean };
 type AdminDashboardData = { users: number; activeUsers: number; activeSubscriptions: number; revenueMinor: number; currency: string; nodesOnline: number; nodesTotal: number; plans: number; pendingOrders: number };
 type AdminUserRecord = { id: string; email: string; role: "admin" | "user"; enabled: boolean; balanceMinor: number; planId: string; planExpiresAt: string | null; planTrafficBytes: number; billedBytes: number; createdAt: string };
 type AdminNodeRecord = { id: string; name: string; region: string; panelUrl: string; publicAddress: string; username: string; basePath: string; status: string; inboundCount: number; enabled: boolean; lastCheckedAt: string | null; syncStatus: string };
@@ -58,7 +58,7 @@ type AdminInboundStats = { inboundId: string; nodes: number; clients: number };
 type AdminOrderRecord = UserOrderData & { userId: string; paidAt: string | null };
 type AdminUserRow = { id: string; name: string; email: string; initials: string; color: string; role: string; plan: string; usage: string; date: string; state: string; enabled: boolean };
 type DisplayOrderRow = { id: string; customer: string; email: string; plan: string; amount: string; method: string; date: string; state: string };
-type DisplayPlanRow = { id: string; name: string; detail: string; level: string; traffic: string; price: string; cycle: string; users: string; tone: string; enabled: boolean };
+type DisplayPlanRow = { id: string; name: string; detail: string; level: string; traffic: string; price: string; cycle: string; users: string; tone: string; enabled: boolean; hidden: boolean };
 type DisplayInboundRow = { id: string; name: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean };
 type UserOverviewData = {
   user: AuthenticatedUser & { balanceMinor: number; planLevel: number; planExpiresAt: string | null; createdAt: string; checkinStreak: number; lastCheckinAt: string | null };
@@ -406,6 +406,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
   const [showTheme, setShowTheme] = useState(false);
   const [editor, setEditor] = useState<AdminEditor | null>(null);
   const [adjustUser, setAdjustUser] = useState<AdminUserRecord | null>(null);
+  const [planUser, setPlanUser] = useState<AdminUserRecord | null>(null);
   const [overview, setOverview] = useState<UserOverviewData | null>(null);
   const [userPlans, setUserPlans] = useState<ApiPlan[]>([]);
   const [userNodeRecords, setUserNodeRecords] = useState<UserNodeData[]>([]);
@@ -580,6 +581,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
     users: String(adminUsers.filter((user) => user.planId === plan.id).length),
     tone: ["violet", "mint", "amber"][index % 3]!,
     enabled: plan.enabled,
+    hidden: plan.hidden === true,
   })), [adminPlans, adminUsers, locale]);
   const inboundRows = useMemo<DisplayInboundRow[]>(() => {
     const nodesById = new Map(adminNodes.map((node) => [node.id, node]));
@@ -834,12 +836,13 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
           {editor && <AdminCreateForm kind={editor.kind} initial={editor.id ? editor.kind === "node" ? adminNodes.find((item) => item.id === editor.id) : editor.kind === "inbound" ? adminInbounds.find((item) => item.id === editor.id) : editor.kind === "plan" ? adminPlans.find((item) => item.id === editor.id) : adminUsers.find((item) => item.id === editor.id) : undefined} nodes={adminNodes.filter((node) => node.enabled)} plans={adminPlans} bindings={adminBindings} locale={locale} onCancel={() => setEditor(null)} onSubmit={(body) => saveAdminRecord(editor.kind, body, editor.id)} />}
           {syncDialog && <InboundSyncDialog t={t} locale={locale} nodes={adminNodes.filter((node) => node.enabled)} initialNodeId={syncDialog.nodeId} onClose={() => setSyncDialog(null)} onImported={(count) => { setRefreshToken((value) => value + 1); flash(phrase(locale, "已导入 {n} 个入站", "Imported {n} inbounds", { n: count })); }} />}
           {adjustUser && <BalanceAdjustDialog t={t} locale={locale} user={adjustUser} currency={adminPlans.find((plan) => plan.id === adjustUser.planId)?.currency ?? "USD"} onClose={() => setAdjustUser(null)} onSaved={(message) => { setAdjustUser(null); setRefreshToken((value) => value + 1); flash(message); }} />}
+          {planUser && <UserPlanDialog t={t} locale={locale} user={planUser} plans={adminPlans} onClose={() => setPlanUser(null)} onSaved={(message) => { setPlanUser(null); setRefreshToken((value) => value + 1); flash(message); }} />}
           {overview && !overview.capabilities.trafficMetering && <div className="auth-message" role="status">{say(locale, "当前存储模式不支持可靠流量计量或配额强制。", "Reliable traffic metering and quota enforcement are unavailable with this storage mode.")}</div>}
           {page === "overview" && (admin ? <AdminDashboard t={t} locale={locale} dashboard={adminDashboard} users={filteredUsers} inboundCount={adminInbounds.length} onNavigate={setPage} /> : overview ? <UserDashboard t={t} locale={locale} overview={overview} nodes={userDisplayNodes} recentOrders={orderDisplayRows} onNavigate={setPage} onCopy={copyLink} /> : null)}
           {page === "nodes" && <NodesPage t={t} locale={locale} rows={visibleNodes} admin={admin} onClearSearch={() => setSearch("")} onEdit={(id) => setEditor({ kind: "node", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/nodes/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} onTest={(id) => { void testAdminNode(id); }} />}
-          {page === "users" && <UsersPage t={t} locale={locale} rows={filteredUsers} onEdit={(id) => setEditor({ kind: "user", id })} onAdjust={(id) => setAdjustUser(adminUsers.find((user) => user.id === id) ?? null)} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/users/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
+          {page === "users" && <UsersPage t={t} locale={locale} rows={filteredUsers} onEdit={(id) => setEditor({ kind: "user", id })} onPlan={(id) => setPlanUser(adminUsers.find((user) => user.id === id) ?? null)} onAdjust={(id) => setAdjustUser(adminUsers.find((user) => user.id === id) ?? null)} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/users/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
           {page === "inbounds" && <InboundsPage t={t} locale={locale} rows={inboundRows} onSync={() => setSyncDialog({})} onEdit={(id) => setEditor({ kind: "inbound", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/inbounds/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
-          {page === "plans" && (admin ? <PlansAdmin t={t} locale={locale} plans={planRows} onEdit={(id) => setEditor({ kind: "plan", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/plans/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} /> : <PlansPage t={t} locale={locale} plans={userPlans} currentPlan={overview?.plan ?? null} onCheckout={startPlanCheckout} />)}
+          {page === "plans" && (admin ? <PlansAdmin t={t} locale={locale} plans={planRows} onEdit={(id) => setEditor({ kind: "plan", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/plans/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} onToggleHidden={(id, hidden) => { void mutateAdmin(`/api/admin/plans/${encodeURIComponent(id)}`, "PATCH", { hidden }); }} /> : <PlansPage t={t} locale={locale} plans={userPlans} currentPlan={overview?.plan ?? null} onCheckout={startPlanCheckout} />)}
           {page === "orders" && <OrdersPage t={t} locale={locale} rows={orderDisplayRows} onDelete={(id) => { void mutateAdmin(`/api/admin/orders/${encodeURIComponent(id)}`, "DELETE"); }} onAction={(label) => flash(label)} />}
           {page === "help" && <HelpPage locale={locale} onSubscription={() => { setAdmin(false); setPage("subscription"); }} onPlans={() => { setAdmin(false); setPage("plans"); }} />}
           {page === "subscription" && <SubscriptionPage t={t} locale={locale} subscription={subscription} onCopy={copyLink} onReset={resetSubscription} />}
@@ -916,7 +919,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     if (!initial) return defaults;
     if (kind === "plan") {
       const plan = initial as ApiPlan;
-      return { ...defaults, name: plan.name, description: plan.description, level: String(plan.level), trafficGb: String(plan.trafficBytes / 1_000_000_000), validityDays: String(plan.validityDays), priceMinor: String(plan.priceMinor), currency: plan.currency, resetUnit: plan.resetUnit, resetInterval: String(plan.resetInterval), resetAtHour: String(plan.resetAtHour), resetWeekday: String(plan.resetWeekday), resetMonthDay: String(plan.resetMonthDay), allowPaidUpgrade: plan.allowPaidUpgrade, enabled: plan.enabled };
+      return { ...defaults, name: plan.name, description: plan.description, level: String(plan.level), trafficGb: String(plan.trafficBytes / 1_000_000_000), validityDays: String(plan.validityDays), priceMinor: String(plan.priceMinor), currency: plan.currency, resetUnit: plan.resetUnit, resetInterval: String(plan.resetInterval), resetAtHour: String(plan.resetAtHour), resetWeekday: String(plan.resetWeekday), resetMonthDay: String(plan.resetMonthDay), allowPaidUpgrade: plan.allowPaidUpgrade, enabled: plan.enabled, hidden: plan.hidden === true };
     }
     if (kind === "node") {
       const node = initial as AdminNodeRecord;
@@ -965,7 +968,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       if (kind === "plan") {
         const trafficBytes = Number(fields.trafficGb) * 1_000_000_000;
         if (!Number.isSafeInteger(trafficBytes)) throw new Error(text("流量必须是可表示的安全整数 GB。", "Traffic must resolve to a safe whole-byte value."));
-        body = { name: String(fields.name).trim(), description: fields.description, level: Number(fields.level), trafficBytes, validityDays: Number(fields.validityDays), priceMinor: Number(fields.priceMinor), currency: String(fields.currency).toUpperCase(), resetUnit: fields.resetUnit, resetInterval: Number(fields.resetInterval), resetAtHour: Number(fields.resetAtHour), resetWeekday: Number(fields.resetWeekday), resetMonthDay: Number(fields.resetMonthDay), allowPaidUpgrade: fields.allowPaidUpgrade === true, enabled: fields.enabled === true };
+        body = { name: String(fields.name).trim(), description: fields.description, level: Number(fields.level), trafficBytes, validityDays: Number(fields.validityDays), priceMinor: Number(fields.priceMinor), currency: String(fields.currency).toUpperCase(), resetUnit: fields.resetUnit, resetInterval: Number(fields.resetInterval), resetAtHour: Number(fields.resetAtHour), resetWeekday: Number(fields.resetWeekday), resetMonthDay: Number(fields.resetMonthDay), allowPaidUpgrade: fields.allowPaidUpgrade === true, enabled: fields.enabled === true, hidden: fields.hidden === true };
       } else if (kind === "node") {
         if (!initial && !String(fields.password) && !String(fields.apiToken)) throw new Error(text("请填写面板密码或 API Token。", "Provide a panel password or API token."));
         body = { name: String(fields.name).trim(), region: fields.region, panelUrl: String(fields.panelUrl).trim(), publicAddress: fields.publicAddress, username: fields.username, basePath: fields.basePath, enabled: fields.enabled === true, ...(fields.password ? { password: fields.password } : {}), ...(fields.apiToken ? { apiToken: fields.apiToken } : {}) };
@@ -1027,6 +1030,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         <label><span>{text("重置周期", "Reset cycle")}</span><select value={String(fields.resetUnit)} onChange={(event) => setFields((current) => ({ ...current, resetUnit: event.target.value }))}><option value="none">{say(locale, "不限", "None")}</option><option value="day">{say(locale, "每日", "Daily")}</option><option value="week">{say(locale, "每周", "Weekly")}</option><option value="month">{say(locale, "每月", "Monthly")}</option><option value="year">{say(locale, "每年", "Yearly")}</option></select></label>
         {checkField("allowPaidUpgrade", text("允许付费升级", "Allow paid upgrades"))}
         {checkField("enabled", text("启用套餐", "Plan enabled"))}
+        {checkField("hidden", text("对用户隐藏（仍可由管理员分配）", "Hide from users (admins can still assign it)"))}
       </>)}
       {planEditingDefault && <div className="admin-form-note">{text("默认免费套餐固定等级 0、价格 0，可调整流量与有效期；改动只对之后创建的账户生效，已有账户保留各自额度。", "The default free plan keeps level 0 and price 0. Traffic and validity apply to accounts created afterwards; existing accounts keep their own quota.")}</div>}
     </>}
@@ -1273,8 +1277,72 @@ function BalanceAdjustDialog({ t, locale, user, currency, onClose, onSaved }: { 
   </div>{error && <div className="auth-message error" role="alert">{error}</div>}<div className="admin-form-actions"><button className="outline-button" type="button" onClick={onClose}>{t("cancel")}</button><button className="primary-button" type="submit" disabled={busy}>{busy ? text("正在保存…", "Saving…") : text("确认调整", "Apply adjustment")}</button></div></form></section></div>;
 }
 
-type RemoteInboundRow = { panelInboundId: number; name: string; protocol: string; port: number; network: string; security: string; enabled: boolean; imported: boolean };
+/** Formats an ISO timestamp for a datetime-local input in the operator's own timezone. */
+function toLocalDateTimeInput(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
 
+/** Assigns a plan, shifts its expiry, or clears the metered traffic of one account. */
+function UserPlanDialog({ t, locale, user, plans, onClose, onSaved }: { t: TextFn; locale: Locale; user: AdminUserRecord; plans: ApiPlan[]; onClose: () => void; onSaved: (message: string) => void }) {
+  const initialExpiry = toLocalDateTimeInput(user.planExpiresAt);
+  const [planId, setPlanId] = useState(user.planId);
+  const [expiresAt, setExpiresAt] = useState(initialExpiry);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const text = (zh: string, en: string) => say(locale, zh, en);
+  const currentPlan = plans.find((plan) => plan.id === user.planId) ?? null;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const shiftExpiry = (days: number) => {
+    setError("");
+    setExpiresAt((current) => {
+      const parsed = current ? new Date(current) : new Date();
+      const base = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+      return toLocalDateTimeInput(new Date(base.getTime() + days * 86400000).toISOString());
+    });
+  };
+
+  const patch = async (body: Record<string, unknown>, message: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      onSaved(message);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : text("保存失败。", "The update failed."));
+      setBusy(false);
+    }
+  };
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body: Record<string, unknown> = {};
+    if (planId !== user.planId) body.planId = planId;
+    if (expiresAt !== initialExpiry) body.planExpiresAt = expiresAt ? new Date(expiresAt).toISOString() : null;
+    if (!Object.keys(body).length) { setError(text("没有需要保存的改动。", "Nothing to save.")); return; }
+    await patch(body, text("已更新账户套餐。", "Plan updated."));
+  };
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="panel admin-create-panel is-compact" role="dialog" aria-modal="true" aria-labelledby="user-plan-title"><form className="admin-create-form" onSubmit={(event) => { void submit(event); }}><div className="admin-create-heading"><div><div className="section-kicker">{text("管理操作", "ADMIN ACTION")}</div><h2 id="user-plan-title">{text("套餐与用量", "Plan and usage")}</h2></div><button className="quiet-icon" type="button" aria-label={text("关闭", "Close")} onClick={onClose}><X size={17} /></button></div><div className="admin-form-grid">
+    <label><span>{text("账户", "Account")}</span><input value={user.email} readOnly /></label>
+    <label><span>{text("当前套餐", "Current plan")}</span><input value={currentPlan?.name ?? user.planId} readOnly /></label>
+    <label><span>{text("已用 / 总量", "Used / limit")}</span><input value={`${formatBytes(user.billedBytes)} / ${formatBytes(user.planTrafficBytes)}`} readOnly /></label>
+    <label><span>{text("分配套餐", "Assign plan")}</span><select value={planId} onChange={(event) => { setError(""); setPlanId(event.target.value); }}>{plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}{plan.hidden ? ` · ${say(locale, "已隐藏", "hidden")}` : ""}{plan.enabled ? "" : ` · ${say(locale, "已停用", "disabled")}`}</option>)}</select></label>
+    <label><span>{text("到期时间（留空表示不限期）", "Expiration (blank = no expiry)")}</span><input type="datetime-local" value={expiresAt} onChange={(event) => { setError(""); setExpiresAt(event.target.value); }} /></label>
+    <div className="admin-form-wide admin-form-inline">{[-30, -7, 7, 30].map((days) => <button key={days} className="outline-button small" type="button" onClick={() => shiftExpiry(days)}>{days > 0 ? `+${days}` : String(days)} {say(locale, "天", "days")}</button>)}</div>
+    <div className="admin-form-wide admin-form-note">{text("更换套餐会按新套餐的有效期重新计算到期时间，并清零已用流量；只调整到期时间不会影响已用流量。", "Switching plans recalculates the expiry from the new plan and clears the metered traffic; shifting the expiry alone leaves usage untouched.")}</div>
+  </div>{error && <div className="auth-message error" role="alert">{error}</div>}<div className="admin-form-actions"><button className="outline-button" type="button" disabled={busy || user.billedBytes === 0} onClick={() => { void patch({ billedBytes: 0 }, text("已重置该账户的已用流量。", "Metered traffic was reset.")); }}>{text("重置流量", "Reset traffic")}</button><button className="outline-button" type="button" onClick={onClose}>{t("cancel")}</button><button className="primary-button" type="submit" disabled={busy}>{busy ? text("正在保存…", "Saving…") : text("保存", "Save")}</button></div></form></section></div>;
+}
+
+type RemoteInboundRow = { panelInboundId: number; name: string; protocol: string; port: number; network: string; security: string; enabled: boolean; imported: boolean };
 /** Imports inbounds that already live on a 3X-UI node; they stay unbound from every plan. */
 function InboundSyncDialog({ t, locale, nodes, initialNodeId, onClose, onImported }: { t: TextFn; locale: Locale; nodes: AdminNodeRecord[]; initialNodeId?: string; onClose: () => void; onImported: (count: number) => void }) {
   const [nodeId, setNodeId] = useState(() => initialNodeId ?? nodes[0]?.id ?? "");
@@ -1366,8 +1434,15 @@ function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, o
         fr: `Pointez aujourd'hui · récompense ${attendanceRewardLabel(overview.attendance)}`,
       });
   const hero = heroTitle(locale, "user");
+  const checkinLabel = !overview?.capabilities.trafficMetering
+    ? say(locale, "签到不可用", "Check-in unavailable")
+    : (overview.attendance.maxRewardBytes ?? overview.attendance.rewardBytes) <= 0
+      ? say(locale, "签到未开放", "Check-in closed")
+      : overview.attendance.checkedInToday
+        ? say(locale, "今日已签到", "Checked in today")
+        : say(locale, "签到", "Check in");
   return <>
-    <div className="welcome-banner"><div className="banner-glow glow-one" /><div className="banner-glow glow-two" /><div className="banner-copy"><div className="banner-label"><Sparkles size={14} /> {say(locale, "你的网络已就绪", "YOUR NETWORK IS IN ORBIT")}</div><h2>{hero.lead}<em>{hero.accent}</em></h2><p>{say(locale, "安全、快速又稳定的连接，想去哪就去哪。", "A secure, fast and steady connection for wherever you’re headed.")}</p><button className="banner-button" onClick={() => onNavigate("subscription")}>{t("subscription")} <ArrowRight size={15} /></button></div><div className="orbit-art" aria-hidden="true"><div className="orbit orbit-a" /><div className="orbit orbit-b" /><div className="orbit orbit-c" /><div className="planet"><span /><i /><b /></div><div className="orbit-star star-a">✦</div><div className="orbit-star star-b">✧</div><div className="orbit-dot dot-a" /><div className="orbit-dot dot-b" /></div><div className="banner-foot"><span><span className="live-indicator" />{say(locale, "节点状态", "NODE STATUS")}</span><span><b>{nodes.filter((node) => node.state === "online").length} / {nodes.length}</b></span></div></div>
+    <div className="welcome-banner"><div className="banner-glow glow-one" /><div className="banner-glow glow-two" /><div className="banner-copy"><div className="banner-label"><Sparkles size={14} /> {say(locale, "你的网络已就绪", "YOUR NETWORK IS IN ORBIT")}</div><h2>{hero.lead}<em>{hero.accent}</em></h2><p>{say(locale, "安全、快速又稳定的连接，想去哪就去哪。", "A secure, fast and steady connection for wherever you’re headed.")}</p><div className="banner-actions"><button className="banner-button" onClick={() => onNavigate("subscription")}>{t("subscription")} <ArrowRight size={15} /></button><button className="banner-button ghost" onClick={() => onNavigate("checkin")}><Zap size={14} />{checkinLabel}</button></div></div><div className="orbit-art" aria-hidden="true"><div className="orbit orbit-a" /><div className="orbit orbit-b" /><div className="orbit orbit-c" /><div className="planet"><span /><i /><b /></div><div className="orbit-star star-a">✦</div><div className="orbit-star star-b">✧</div><div className="orbit-dot dot-a" /><div className="orbit-dot dot-b" /></div><div className="banner-foot"><span><span className="live-indicator" />{say(locale, "节点状态", "NODE STATUS")}</span><span><b>{nodes.filter((node) => node.state === "online").length} / {nodes.length}</b></span></div></div>
 
     <div className="stats-grid">
       <StatCard icon={Gauge} label={t("remaining")} value={formatBytes(overview?.usage.remainingBytes ?? 0)} hint={t("available")} tone="mint" meter={100 - usagePercent} moreLabel={t("more")} />
@@ -1454,7 +1529,7 @@ function NodesPage({ t, locale, rows, admin, onClearSearch, onEdit, onToggle, on
     <div className="node-list-foot"><span><i /> {t("statusGood")}</span><span>{t("refreshSoon")}</span></div>
   </div>;
 }
-function UsersPage({ t, locale, rows, onEdit, onAdjust, onToggle }: { t: TextFn; locale: Locale; rows: AdminUserRow[]; onEdit: (userId: string) => void; onAdjust: (userId: string) => void; onToggle: (userId: string, enabled: boolean) => void }) {
+function UsersPage({ t, locale, rows, onEdit, onPlan, onAdjust, onToggle }: { t: TextFn; locale: Locale; rows: AdminUserRow[]; onEdit: (userId: string) => void; onPlan: (userId: string) => void; onAdjust: (userId: string) => void; onToggle: (userId: string, enabled: boolean) => void }) {
   return <div className="panel data-panel">
     <PageToolbar t={t} count={phrase(locale, "{n} 个用户", "{n} users", { n: rows.length })} />
     <div className="table-wrap full-table">
@@ -1472,6 +1547,7 @@ function UsersPage({ t, locale, rows, onEdit, onAdjust, onToggle }: { t: TextFn;
             <td className="cell-actions" data-label="">
               <div className="row-actions">
                 <button className="outline-button small" onClick={() => onEdit(user.id)}>{t("edit")}</button>
+                <button className="outline-button small" onClick={() => onPlan(user.id)}>{say(locale, "套餐", "Plan")}</button>
                 <button className="outline-button small" onClick={() => onAdjust(user.id)}>{say(locale, "充值 / 退款", "Credit / refund")}</button>
                 <button className="outline-button small" onClick={() => onToggle(user.id, !user.enabled)}>{user.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button>
               </div>
@@ -1510,8 +1586,8 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn
     </div>
   </div>;
 }
-function PlansAdmin({ t, locale, plans, onEdit, onToggle }: { t: TextFn; locale: Locale; plans: DisplayPlanRow[]; onEdit: (planId: string) => void; onToggle: (planId: string, enabled: boolean) => void }) {
-  return <div className="plans-grid">{plans.map((plan) => <article className={`plan-admin-card ${plan.tone}`} key={plan.id}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Sparkles size={17} /></span><span className={`status-chip ${plan.enabled ? "" : "pending"}`}><i />{plan.enabled ? t("enabled") : t("disabled")}</span></div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("level")}</span><b>{plan.level}</b></div><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div><div><span>{t("users")}</span><b>{plan.users}</b></div></div><button className="outline-button wide" onClick={() => onEdit(plan.id)}>{t("edit")}</button><button className="outline-button wide" onClick={() => onToggle(plan.id, !plan.enabled)}>{plan.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></article>)}</div>;
+function PlansAdmin({ t, locale, plans, onEdit, onToggle, onToggleHidden }: { t: TextFn; locale: Locale; plans: DisplayPlanRow[]; onEdit: (planId: string) => void; onToggle: (planId: string, enabled: boolean) => void; onToggleHidden: (planId: string, hidden: boolean) => void }) {
+  return <div className="plans-grid">{plans.map((plan) => <article className={`plan-admin-card ${plan.tone}`} key={plan.id}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Sparkles size={17} /></span><span className="plan-admin-chips">{plan.hidden && <span className="status-chip pending"><i />{say(locale, "已隐藏", "Hidden")}</span>}<span className={`status-chip ${plan.enabled ? "" : "pending"}`}><i />{plan.enabled ? t("enabled") : t("disabled")}</span></span></div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("level")}</span><b>{plan.level}</b></div><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div><div><span>{t("users")}</span><b>{plan.users}</b></div></div><button className="outline-button wide" onClick={() => onEdit(plan.id)}>{t("edit")}</button><button className="outline-button wide" onClick={() => onToggleHidden(plan.id, !plan.hidden)}>{plan.hidden ? say(locale, "对用户显示", "Show to users") : say(locale, "对用户隐藏", "Hide from users")}</button><button className="outline-button wide" onClick={() => onToggle(plan.id, !plan.enabled)}>{plan.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></article>)}</div>;
 }
 
 function PlansPage({ t, locale, plans, currentPlan, onCheckout }: { t: TextFn; locale: Locale; plans: ApiPlan[]; currentPlan: ApiPlan | null; onCheckout: (plan: ApiPlan) => void }) {

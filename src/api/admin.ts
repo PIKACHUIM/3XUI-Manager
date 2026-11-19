@@ -686,6 +686,7 @@ function planValues(body: Record<string, unknown>): Omit<Plan, "id" | "isDefault
     allowPaidUpgrade: body.allowPaidUpgrade === true,
     ...(typeof body.dodoProductId === "string" && body.dodoProductId.trim() ? { dodoProductId: body.dodoProductId.trim().slice(0, 120) } : {}),
     enabled: body.enabled !== false,
+    hidden: body.hidden === true,
   };
 }
 

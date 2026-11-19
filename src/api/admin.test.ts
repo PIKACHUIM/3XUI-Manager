@@ -149,6 +149,20 @@ describe("admin API local D1 integration", () => {
     });
     expect(update.status).toBe(200);
     expect(await update.json()).toMatchObject({ plan: { id: plan.id, enabled: false } });
+
+    const hide = await request(`/api/admin/plans/${plan.id}`, {
+      method: "PATCH",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, hidden: true }),
+    });
+    expect(hide.status).toBe(200);
+    expect(await hide.json()).toMatchObject({ plan: { id: plan.id, enabled: true, hidden: true } });
+
+    const adminList = await (await request("/api/admin/plans", { headers })).json() as { items: Array<{ id: string; hidden?: boolean }> };
+    expect(adminList.items).toContainEqual(expect.objectContaining({ id: plan.id, hidden: true }));
+
+    const userList = await (await request("/api/user/plans", { headers })).json() as { items: Array<{ id: string }> };
+    expect(userList.items.map((item) => item.id)).not.toContain(plan.id);
   });
 
   it("lets an administrator create a verified user who can sign in immediately", async () => {

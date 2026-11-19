@@ -172,7 +172,7 @@ userApi.get("/overview", async (c) => {
 
 userApi.get("/plans", async (c) => {
   const items = await listAll<Plan>(c.get("store"), "plans");
-  return c.json({ items: items.filter((plan) => plan.enabled).sort((a, b) => a.level - b.level || a.priceMinor - b.priceMinor) });
+  return c.json({ items: items.filter((plan) => plan.enabled && plan.hidden !== true).sort((a, b) => a.level - b.level || a.priceMinor - b.priceMinor) });
 });
 
 userApi.get("/usage", async (c) => {

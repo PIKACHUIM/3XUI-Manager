@@ -70,6 +70,8 @@ export interface Plan {
   dodoProductId?: string;
   isDefault: boolean;
   enabled: boolean;
+  /** Hidden plans stay assignable by an administrator but never appear in the user-facing catalogue. */
+  hidden?: boolean;
   createdAt: string;
   updatedAt: string;
 }

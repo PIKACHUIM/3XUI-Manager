@@ -105,7 +105,7 @@ export async function createCheckout(store: DocumentStore, env: RuntimeEnv, user
     } else {
       if (!input.planId) throw new Error("Select a plan.");
       plan = await store.get<Plan>("plans", input.planId);
-      if (!plan || !plan.enabled || plan.isDefault || plan.priceMinor <= 0) throw new Error("Selected plan is unavailable for purchase.");
+      if (!plan || !plan.enabled || plan.hidden || plan.isDefault || plan.priceMinor <= 0) throw new Error("Selected plan is unavailable for purchase.");
       currency = plan.currency.toUpperCase();
       amountMinor = plan.priceMinor;
       if (input.type === "subscription" && plan.level < user.planLevel && (!user.planExpiresAt || Date.parse(user.planExpiresAt) > Date.now())) throw new Error("Downgrades are not allowed while the current plan is active.");
