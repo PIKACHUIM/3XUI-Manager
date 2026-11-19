@@ -121,6 +121,18 @@ function describesBareIpBlock(response: Response, payload: XuiEnvelope<unknown>)
 
 const BARE_IP_BLOCKED = "Cloudflare Workers cannot fetch a bare IP address. Point a DNS record at the panel (for example panel.example.com) and use that hostname instead of the IP.";
 
+/**
+ * fetch() rejects with a bare "operation was aborted" when the origin never answers,
+ * which hides which address was tried and why it failed.
+ */
+function describeNetworkFailure(error: unknown, target: URL, seconds: number): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  if (/timeout|abort/i.test(detail)) {
+    return `no response from ${target.host} within ${seconds}s — the host is dropping Cloudflare's connection; check its firewall or serve the panel through a Cloudflare Tunnel`;
+  }
+  return `${target.host}: ${detail}`;
+}
+
 /** Builds the 3X-UI add/update payload, keeping unknown top-level config keys. */
 export function inboundPayload(inbound: Inbound): Record<string, unknown> {
   const { settings, streamSettings, sniffing, ...extra } = inbound.config;
@@ -202,13 +214,14 @@ export class ThreeXuiClient {
     for (const [contentType, body] of attempts) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         let response: Response;
+        const loginUrl = new URL(`${this.basePath()}/login`, this.origin);
         try {
           const headers = new Headers({ "Content-Type": contentType, Accept: "application/json", "X-Requested-With": "XMLHttpRequest" });
           if (this.cookie) headers.set("Cookie", this.cookie);
           if (this.csrf) headers.set("X-CSRF-Token", this.csrf);
-          response = await fetch(new URL(`${this.basePath()}/login`, this.origin), { method: "POST", headers, body, signal: AbortSignal.timeout(12000) });
+          response = await fetch(loginUrl, { method: "POST", headers, body, signal: AbortSignal.timeout(12000) });
         } catch (error) {
-          errors.push(error instanceof Error ? error.message : "network error");
+          errors.push(describeNetworkFailure(error, loginUrl, 12));
           break;
         }
         const cookie = readSessionCookie(response);
@@ -257,6 +270,7 @@ export class ThreeXuiClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<XuiEnvelope<T>> {
+    const target = new URL(`${this.basePath()}${path}`, this.origin);
     const send = async (): Promise<Response> => {
       const headers = new Headers(init.headers);
       headers.set("Accept", "application/json");
@@ -264,7 +278,11 @@ export class ThreeXuiClient {
       if (this.bearer) headers.set("Authorization", `Bearer ${this.bearer}`);
       if (this.cookie) headers.set("Cookie", this.cookie);
       if (!this.bearer && this.csrf) headers.set("X-CSRF-Token", this.csrf);
-      return fetch(new URL(`${this.basePath()}${path}`, this.origin), { ...init, headers, signal: AbortSignal.timeout(15000) });
+      try {
+        return await fetch(target, { ...init, headers, signal: AbortSignal.timeout(15000) });
+      } catch (error) {
+        throw new Error(`3X-UI request failed: ${describeNetworkFailure(error, target, 15)}`);
+      }
     };
     let response = await send();
     if (!response.ok && this.password) {

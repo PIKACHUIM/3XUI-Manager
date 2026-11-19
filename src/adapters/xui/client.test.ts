@@ -197,6 +197,15 @@ describe("ThreeXuiClient login", () => {
     expect(calls.at(-1)?.url).toBe("http://43.226.62.230.nip.io:61090/panel/api/inbounds/list");
   });
 
+  it("names the contacted host when the panel never answers", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }));
+
+    await expect(ThreeXuiClient.connect(env, await makeNode({ panelUrl: "http://43.226.62.230:61090" })))
+      .rejects.toThrow(/no response from 43\.226\.62\.230\.nip\.io:61090 within 12s/);
+  });
+
   it("asks for HTTPS when Cloudflare gets an empty plain HTTP reply", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       capture(input, init, []);
