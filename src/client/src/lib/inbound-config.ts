@@ -129,7 +129,9 @@ const protocolFallbackKeys = new Set([
 
 /** Rebuilds a 3X-UI protocol `settings` object from the structured form. */
 function buildSettings(fields: InboundFieldMap, protocol: string, baseSettings: Record<string, unknown>): Record<string, unknown> {
-  const clients = Array.isArray(baseSettings.clients) ? baseSettings.clients : [];
+  const stored = Array.isArray(baseSettings.clients) ? baseSettings.clients : [];
+  const edited = jsonField(fields, "clients", stored);
+  const clients = Array.isArray(edited) ? edited : stored;
   const storedFallbacks = Array.isArray(baseSettings.fallbacks) ? baseSettings.fallbacks : [];
   const settings: Record<string, unknown> = Object.fromEntries(Object.entries(baseSettings).filter(([key]) => !protocolFallbackKeys.has(key)));
 
@@ -506,7 +508,7 @@ export function buildInboundMeta(fields: InboundFieldMap): InboundMeta {
   };
 }
 
-function localDateTime(epochMs: number): string {
+export function localDateTime(epochMs: number): string {
   if (!Number.isFinite(epochMs) || epochMs <= 0) return "";
   const date = new Date(epochMs);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -572,6 +574,7 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
     disableFlow: record.disableFlow === true,
     clientFlow: record.defaultFlow ?? "",
     // Protocol settings.
+    clients: compactJson(settings.clients),
     vlessDecryption: plainText(settings.decryption, "none"),
     protocolFallbacks: compactJson(settings.fallbacks),
     protocolAccounts: compactJson(settings.accounts),

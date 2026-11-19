@@ -86,6 +86,15 @@ describe("inbound config builder", () => {
     expect((rebuilt.streamSettings as Record<string, unknown>).wsSettings).toEqual({ acceptProxyProtocol: false, path: "/new", headers: {} });
   });
 
+  it("replaces stored clients with the list edited in the form", () => {
+    const existing = { settings: { clients: [{ id: "old", email: "old@test" }], decryption: "none" } };
+    const fields = inboundFieldValues({ name: "Tokyo", protocol: "vless", network: "tcp", port: 443, minimumLevel: 0, multiplier: 1, enabled: true, config: existing });
+    expect(fields.clients).toBe('[{"id":"old","email":"old@test"}]');
+    const next = [{ id: "new", email: "new@test", enable: true, totalGB: 0, expiryTime: 0, flow: "", limitIp: 0, subId: "abc123", reset: 0 }];
+    const rebuilt = buildInboundConfig({ ...fields, clients: JSON.stringify(next) });
+    expect(rebuilt.settings).toEqual({ clients: next, decryption: "none" });
+  });
+
   it("handles shadowsocks credentials and disabled sniffing", () => {
     const config = buildInboundConfig({
       ...baseFields,

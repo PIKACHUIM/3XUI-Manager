@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Check, ChevronDown,
   ChevronLeft, ChevronRight, CircleHelp, Command, CreditCard, Globe2, Gauge,
-  LayoutDashboard, LifeBuoy, LogOut, Menu, Moon, MoreHorizontal, Network, Palette, Pencil, Power,
-  Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Users,
+  LayoutDashboard, LifeBuoy, LogOut, Menu, Moon, MoreHorizontal, Network, Palette, Pencil, Plus, Power,
+  Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Trash2, Users,
   Wallet, Wifi, X, Zap, type LucideIcon
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
 import { detectLocale, EN_MESSAGES, LOCALE_META, LOCALES, localeDirection, messages, phrase, pick, saveLocale, say, type Locale, type MessageKey } from "../lib/i18n";
-import { buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, kcpHeaderTypes, tlsVersions, trafficResetUnits, xhttpModes } from "../lib/inbound-config";
+import { buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, jsonObject, kcpHeaderTypes, localDateTime, plainObject, tlsVersions, trafficResetUnits, xhttpModes } from "../lib/inbound-config";
 
 import { HelpPage } from "./HelpPage";
 import { SubscriptionLinks, type SubscriptionLinksData } from "./SubscriptionLinks";
@@ -906,6 +906,69 @@ const inboundJsonFields: Array<[string, "object" | "array"]> = [
   ["hysteriaMasquerade", "object"], ["sockCustomSockopt", "array"], ["tcpMasks", "array"], ["udpMasks", "array"], ["baseConfig", "object"],
 ];
 
+/** One editable client of the inbound, mirroring a 3X-UI client entry. */
+type InboundClientDraft = {
+  key: string;
+  id: string;
+  email: string;
+  password: string;
+  flow: string;
+  limitIp: string;
+  totalGb: string;
+  expiry: string;
+  subId: string;
+  reset: string;
+  enable: boolean;
+  raw: Record<string, unknown>;
+};
+
+const inboundClientProtocols = ["vless", "vmess", "trojan", "shadowsocks"] as const;
+
+function randomClientSecret(length = 18): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (value) => (value % 36).toString(36)).join("");
+}
+
+function inboundClientDrafts(record?: AdminInboundRecord): InboundClientDraft[] {
+  const settings = plainObject(record ? jsonObject(record.config).settings : {});
+  const source = Array.isArray(settings.clients) ? settings.clients : [];
+  return source
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    .map((entry, index) => ({
+      key: `${String(entry.id ?? entry.email ?? "client")}-${index}`,
+      id: typeof entry.id === "string" ? entry.id : "",
+      email: typeof entry.email === "string" ? entry.email : "",
+      password: typeof entry.password === "string" ? entry.password : "",
+      flow: typeof entry.flow === "string" ? entry.flow : "",
+      limitIp: String(entry.limitIp ?? 0),
+      totalGb: Number(entry.totalGB) > 0 ? String(Number(entry.totalGB) / 1_000_000_000) : "0",
+      expiry: localDateTime(Number(entry.expiryTime ?? 0)),
+      subId: typeof entry.subId === "string" ? entry.subId : "",
+      reset: String(entry.reset ?? 0),
+      enable: entry.enable !== false,
+      raw: entry,
+    }));
+}
+
+/** Writes the edited client back into a 3X-UI client object, keeping unknown keys. */
+function clientDraftPayload(draft: InboundClientDraft, protocol: string): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...draft.raw };
+  next.email = draft.email.trim();
+  if (protocol === "vless" || protocol === "vmess") next.id = draft.id.trim();
+  else delete next.id;
+  if (protocol === "trojan" || protocol === "shadowsocks") next.password = draft.password;
+  else delete next.password;
+  if (protocol === "vless") next.flow = draft.flow;
+  else delete next.flow;
+  next.limitIp = Math.max(0, Math.round(Number(draft.limitIp) || 0));
+  next.totalGB = Math.max(0, Math.round((Number(draft.totalGb) || 0) * 1_000_000_000));
+  next.expiryTime = draft.expiry ? Date.parse(draft.expiry) || 0 : 0;
+  next.enable = draft.enable;
+  next.subId = draft.subId.trim();
+  next.reset = Math.max(0, Math.round(Number(draft.reset) || 0));
+  return next;
+}
+
 
 function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, onCancel, onSubmit }: { kind: AdminCreateKind; initial?: ApiPlan | AdminNodeRecord | AdminInboundRecord | AdminUserRecord; nodes: AdminNodeRecord[]; plans: ApiPlan[]; bindings?: AdminInboundBinding[]; locale: Locale; onCancel: () => void; onSubmit: (body: Record<string, unknown>) => Promise<void> }) {
   const [fields, setFields] = useState<Record<string, string | boolean>>(() => {
@@ -932,18 +995,10 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     return { ...defaults, email: user.email, role: user.role, enabled: user.enabled, planExpiresAt: localExpiration };
   });
   const [nodeIds, setNodeIds] = useState<string[]>(() => initial && kind === "inbound" ? bindings.filter((binding) => binding.inboundId === initial.id).map((binding) => binding.nodeId) : kind === "inbound" && nodes.length ? [nodes[0].id] : []);
+  const [clients, setClients] = useState<InboundClientDraft[]>(() => (kind === "inbound" ? inboundClientDrafts(initial as AdminInboundRecord | undefined) : []));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [activeTab, setActiveTab] = useState("basic");
   const text = (zh: string, en: string) => say(locale, zh, en);
-  const inboundTabs: Array<[string, string]> = [
-    ["basic", text("基本设置", "Basics")],
-    ["protocol", text("协议设置", "Protocol")],
-    ["transport", text("传输设置", "Transport")],
-    ["security", text("传输安全", "Security")],
-    ["sniffing", text("流量嗅探", "Sniffing")],
-    ["advanced", text("高级设置", "Advanced")],
-  ];
   const planEditingDefault = kind === "plan" && initial ? (initial as ApiPlan).isDefault : false;
   const title = initial ? kind === "node" ? text("编辑节点", "Edit node") : kind === "inbound" ? text("编辑入站", "Edit inbound") : kind === "plan" ? text("编辑套餐", "Edit plan") : text("编辑用户", "Edit user") : kind === "node" ? text("添加 3X-UI 节点", "Add 3X-UI node") : kind === "inbound" ? text("添加入站", "Add inbound") : kind === "plan" ? text("添加套餐", "Add plan") : text("添加用户", "Add user");
   const field = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => <label><span>{label}</span><input {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
@@ -959,6 +1014,22 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   const areaField = (name: string, label: string, props: React.TextareaHTMLAttributes<HTMLTextAreaElement> = {}) => <label className="admin-form-wide"><span>{label}</span><textarea rows={3} {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
   const checkListField = (name: string, values: readonly string[], label: string) => <fieldset className="admin-node-options"><legend>{label}</legend>{values.map((value) => <label key={value}><input type="checkbox" checked={String(fields[name] ?? "").split(",").includes(value)} onChange={toggleListField(name, value)} /><span>{value.toUpperCase()}</span></label>)}</fieldset>;
   const formSection = (title: string, body: React.ReactNode) => <section className="admin-form-block"><h3>{title}</h3><div className="admin-form-grid two-col">{body}</div></section>;
+  const updateClient = (key: string, patch: Partial<InboundClientDraft>) => setClients((current) => current.map((client) => (client.key === key ? { ...client, ...patch } : client)));
+  const addClient = () => setClients((current) => [...current, {
+    key: `client-${Date.now()}-${current.length}`,
+    id: crypto.randomUUID(),
+    email: `client_${randomClientSecret(6)}`,
+    password: randomClientSecret(),
+    flow: "",
+    limitIp: "0",
+    totalGb: "0",
+    expiry: "",
+    subId: randomClientSecret(16),
+    reset: "0",
+    enable: true,
+    raw: {},
+  }]);
+  const removeClient = (key: string) => setClients((current) => current.filter((client) => client.key !== key));
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
@@ -973,12 +1044,11 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         if (!initial && !String(fields.password) && !String(fields.apiToken)) throw new Error(text("请填写面板密码或 API Token。", "Provide a panel password or API token."));
         body = { name: String(fields.name).trim(), region: fields.region, panelUrl: String(fields.panelUrl).trim(), publicAddress: fields.publicAddress, username: fields.username, basePath: fields.basePath, enabled: fields.enabled === true, ...(fields.password ? { password: fields.password } : {}), ...(fields.apiToken ? { apiToken: fields.apiToken } : {}) };
       } else if (kind === "inbound") {
-        const jsonFieldTab = (name: string) => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? "protocol" : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade"].includes(name) ? "transport" : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? "security" : "advanced";
-        if (!initial && !nodeIds.length) { setActiveTab("basic"); throw new Error(text("至少选择一个已启用节点。", "Select at least one enabled node.")); }
+        const jsonSection = (name: string) => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? text("协议设置", "Protocol") : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade"].includes(name) ? text("传输方式", "Transport") : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? text("传输安全", "Security") : text("高级设置", "Advanced");
+        if (!initial && !nodeIds.length) throw new Error(text("至少选择一个已启用节点。", "Select at least one enabled node."));
         const port = Number(fields.port);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) { setActiveTab("basic"); throw new Error(text("端口必须在 1-65535 之间。", "Port must be between 1 and 65535.")); }
+        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(text("端口必须在 1-65535 之间。", "Port must be between 1 and 65535."));
         if (fields.security === "reality" && (!String(fields.realityDest).trim() || !String(fields.realityPrivateKey).trim())) {
-          setActiveTab("security");
           throw new Error(text("REALITY 需要填写目标地址与私钥。", "REALITY needs a destination and a private key."));
         }
         for (const [name, kind] of inboundJsonFields) {
@@ -988,11 +1058,17 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
             const parsed: unknown = JSON.parse(source);
             if (kind === "array" ? !Array.isArray(parsed) : (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) throw new Error("shape");
           } catch {
-            setActiveTab(jsonFieldTab(name));
-            throw new Error(`${text("以下字段必须是合法 JSON：", "This field must contain valid JSON: ")}${name}`);
+            throw new Error(`${jsonSection(name)} · ${text("以下字段必须是合法 JSON：", "This field must contain valid JSON: ")}${name}`);
           }
         }
-        body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig(fields), ...(!initial ? { nodeIds } : {}) };
+        if ((inboundClientProtocols as readonly string[]).includes(String(fields.protocol))) {
+          const emails = clients.map((client) => client.email.trim());
+          if (emails.some((email) => !email)) throw new Error(text("每个客户端都需要填写邮箱。", "Every client needs an email address."));
+          const duplicate = emails.find((email, index) => emails.indexOf(email) !== index);
+          if (duplicate) throw new Error(`${text("客户端邮箱不能重复：", "Duplicate client email: ")}${duplicate}`);
+        }
+        const clientPayload = clients.map((draft) => clientDraftPayload(draft, String(fields.protocol)));
+        body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig({ ...fields, clients: JSON.stringify(clientPayload) }), ...(!initial ? { nodeIds } : {}) };
       } else if (initial) {
         body = { role: fields.role, enabled: fields.enabled === true, planExpiresAt: fields.planExpiresAt ? new Date(String(fields.planExpiresAt)).toISOString() : null };
       } else {
@@ -1013,7 +1089,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}><section className={`panel admin-create-panel${kind === "inbound" ? "" : " is-compact"}`} role="dialog" aria-modal="true" aria-labelledby="admin-create-title"><form className="admin-create-form" onSubmit={(event) => { void submit(event); }}><div className="admin-create-heading"><div><div className="section-kicker">{text("管理操作", "ADMIN ACTION")}</div><h2 id="admin-create-title">{title}</h2></div><button className="quiet-icon" type="button" aria-label={text("关闭", "Close")} onClick={onCancel}><X size={17} /></button></div><div className={kind === "inbound" ? "admin-form-grid" : "admin-form-stack"}>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}><section className={`panel admin-create-panel${kind === "inbound" ? " is-inbound" : " is-compact"}`} role="dialog" aria-modal="true" aria-labelledby="admin-create-title"><form className="admin-create-form" onSubmit={(event) => { void submit(event); }}><div className="admin-create-heading"><div><div className="section-kicker">{text("管理操作", "ADMIN ACTION")}</div><h2 id="admin-create-title">{title}</h2></div><button className="quiet-icon" type="button" aria-label={text("关闭", "Close")} onClick={onCancel}><X size={17} /></button></div><div className={kind === "inbound" ? "admin-form-grid" : "admin-form-stack"}>
     {kind === "plan" && <>
       {formSection(text("基本信息", "Basics"), <>
         {field("name", text("套餐名称", "Plan name"), { required: true, maxLength: 80 })}
@@ -1053,157 +1129,168 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       </>)}
       <div className="admin-form-inline">{checkField("enabled", text("启用节点", "Node enabled"))}</div>
     </>}
-        {kind === "inbound" && <>
-      <div className="admin-form-tabs" role="tablist" aria-label={text("入站设置", "Inbound settings")}>{inboundTabs.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} onClick={() => setActiveTab(key)}>{label}</button>)}</div>
-      <div className="admin-form-tabpanel" role="tabpanel">
-      {activeTab === "basic" && <>
-        {formSection(text("基础", "Basics"), <>
-          {field("name", text("入站名称", "Inbound name"), { required: true, maxLength: 100 })}
-          {field("port", text("端口", "Port"), { type: "number", min: 1, max: 65535, step: 1, required: true })}
-          {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]))}
-          {selectField("network", text("传输方式", "Transport"), inboundNetworks.map((value): [string, string] => [value, inboundNetworkLabels[value] ?? value]))}
-          {selectField("security", text("传输安全", "Transport security"), [["none", text("无", "None")], ["tls", "TLS"], ["reality", "REALITY"]])}
-          {field("listen", text("监听地址（留空为全部）", "Listen address (blank = all)"))}
-        </>)}
-        {formSection(text("流量与到期", "Traffic and expiry"), <>
-          {field("totalGb", text("总流量（十进制 GB，0 为不限）", "Total traffic (decimal GB, 0 = unlimited)"), { type: "number", min: 0, step: 0.001 })}
-          {field("expiryTime", text("到期时间（留空为永不）", "Expiry time (blank = never)"), { type: "datetime-local" })}
-          {selectField("trafficReset", text("流量重置周期", "Traffic reset"), trafficResetUnits.map((value): [string, string] => [value, trafficResetLabel(value, text)]))}
-          {(fields.trafficReset === "monthly" || fields.trafficReset === "weekly") && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 0, max: 31, step: 1 })}
-        </>)}
-        {formSection(text("订阅与分享", "Subscription and sharing"), <>
-          {field("tag", text("标签", "Tag"), { maxLength: 64 })}
-          {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
-          {selectField("shareAddrStrategy", text("分享地址策略", "Share address strategy"), [["node", text("使用节点地址", "Use the node address")], ["listen", text("使用监听地址", "Use the listen address")], ["custom", text("自定义地址", "Custom address")]])}
-          {fields.shareAddrStrategy === "custom" && field("shareAddr", text("自定义分享地址", "Custom share address"), { maxLength: 255 })}
-          {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
-          {checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
-        </>)}
-        {formSection(text("权限与同步", "Access and sync"), <>
-          {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
-          {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
-          {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
-          {checkField("enabled", text("启用入站", "Inbound enabled"))}
-          {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
-        </>)}
-      </>}
+        {kind === "inbound" && <div className="inbound-editor">
+          <div className="inbound-editor-main">
+            {formSection(text("基础", "Basics"), <>
+              {field("name", text("备注", "Remark"), { required: true, maxLength: 100 })}
+              {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]))}
+              {field("listen", text("监听 IP（留空为全部）", "Listen IP (blank = all)"), { placeholder: "0.0.0.0" })}
+              {field("port", text("端口", "Port"), { type: "number", min: 1, max: 65535, step: 1, required: true })}
+              {field("totalGb", text("总流量（GB，0 为不限）", "Total (GB, 0 = unlimited)"), { type: "number", min: 0, step: 0.001 })}
+              {field("expiryTime", text("到期时间（留空为永久）", "Expiry (blank = never)"), { type: "datetime-local" })}
+              {selectField("trafficReset", text("流量重置周期", "Traffic reset"), trafficResetUnits.map((value): [string, string] => [value, trafficResetLabel(value, text)]))}
+              {(fields.trafficReset === "monthly" || fields.trafficReset === "weekly") && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 0, max: 31, step: 1 })}
+            </>)}
 
-      {activeTab === "protocol" && <>
-        {formSection(text("协议参数", "Protocol options"), <>
-          {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 客户端由面板与套餐同步管理，这里只调整入站结构。", "VMess clients are managed by the panel and plan sync; this section only shapes the inbound.")}</div>}
-          {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("VLESS 解密方式", "VLESS decryption"), { placeholder: "none" })}</>}
-          {fields.protocol === "shadowsocks" && <>{selectField("ssMethod", text("加密方式", "Cipher"), [["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"], ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm"], ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"], ["aes-128-gcm", "aes-128-gcm"], ["aes-256-gcm", "aes-256-gcm"], ["chacha20-poly1305", "chacha20-poly1305"], ["xchacha20-poly1305", "xchacha20-poly1305"], ["none", text("无", "None")]])}{field("ssPassword", text("入站密码", "Inbound password"))}{field("ssNetwork", text("网络（tcp,udp）", "Network (tcp,udp)"))}</>}
-          {fields.protocol === "dokodemo-door" && <>{field("dokodemoAddress", text("目标地址", "Destination address"), { placeholder: "1.1.1.1" })}{field("dokodemoPort", text("目标端口", "Destination port"), { type: "number", min: 0, max: 65535, step: 1 })}{selectField("dokodemoNetwork", text("网络", "Network"), [["tcp", "TCP"], ["udp", "UDP"], ["tcp,udp", "TCP+UDP"]])}{checkField("dokodemoFollowRedirect", text("跟随原始目标地址", "Follow redirect"))}{field("dokodemoTimeout", text("超时（秒）", "Timeout (seconds)"), { type: "number", min: 0, step: 1 })}</>}
-          {(fields.protocol === "http" || fields.protocol === "socks" || fields.protocol === "mixed") && <>{selectField("proxyAuth", text("认证方式", "Authentication"), [["noauth", text("无认证", "No auth")], ["password", text("用户名密码", "Username and password")]])}{areaField("protocolAccounts", text("账户（JSON 数组）", "Accounts (JSON array)"), { placeholder: '[{"user":"name","pass":"secret"}]' })}{fields.protocol !== "http" && checkField("proxyUdp", text("允许 UDP", "Allow UDP"))}{fields.protocol === "http" ? <>{checkField("httpAllowTransparent", text("允许透明代理", "Allow transparent proxy"))}{field("httpUserLevel", text("用户等级", "User level"), { type: "number", min: 0, step: 1 })}</> : field("proxyIp", text("本地 IP", "Local IP"), { placeholder: "127.0.0.1" })}</>}
-          {fields.protocol === "wireguard" && <>{field("wireguardSecretKey", text("WireGuard 私钥", "WireGuard secret key"))}{field("wireguardAddress", text("WireGuard 地址（CIDR，逗号分隔）", "WireGuard address (CIDR, comma separated)"))}{field("wireguardMtu", "MTU", { type: "number", min: 0, max: 65535, step: 1 })}{checkField("wireguardNoKernelTun", text("禁用内核 TUN", "Disable kernel TUN"))}{areaField("wireguardPeers", text("对端（JSON 数组）", "Peers (JSON array)"), { placeholder: '[{"publicKey":"…","allowedIPs":["0.0.0.0/0"]}]' })}{areaField("wireguardNoise", text("Noise 配置（JSON）", "Noise settings (JSON)"))}</>}
-        </>)}
-        {formSection(text("回落与额外配置", "Fallbacks and extras"), <>
-          {(fields.protocol === "vless" || fields.protocol === "trojan") && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}
-          {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
-        </>)}
-      </>}
+            {formSection(text("协议设置", "Protocol settings"), <>
+              {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 的客户端在右侧列表中维护，协议本身没有额外参数。", "VMess clients live in the client list on the right; the protocol itself has no extra options.")}</div>}
+              {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("VLESS 解密方式", "VLESS decryption"), { placeholder: "none" })}</>}
+              {fields.protocol === "shadowsocks" && <>{selectField("ssMethod", text("加密方式", "Cipher"), [["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"], ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm"], ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"], ["aes-128-gcm", "aes-128-gcm"], ["aes-256-gcm", "aes-256-gcm"], ["chacha20-poly1305", "chacha20-poly1305"], ["xchacha20-poly1305", "xchacha20-poly1305"], ["none", text("无", "None")]])}{field("ssPassword", text("入站密码", "Inbound password"))}{field("ssNetwork", text("网络（tcp,udp）", "Network (tcp,udp)"))}</>}
+              {fields.protocol === "dokodemo-door" && <>{field("dokodemoAddress", text("目标地址", "Destination address"), { placeholder: "1.1.1.1" })}{field("dokodemoPort", text("目标端口", "Destination port"), { type: "number", min: 0, max: 65535, step: 1 })}{selectField("dokodemoNetwork", text("网络", "Network"), [["tcp", "TCP"], ["udp", "UDP"], ["tcp,udp", "TCP+UDP"]])}{checkField("dokodemoFollowRedirect", text("跟随原始目标地址", "Follow redirect"))}{field("dokodemoTimeout", text("超时（秒）", "Timeout (seconds)"), { type: "number", min: 0, step: 1 })}</>}
+              {(fields.protocol === "http" || fields.protocol === "socks" || fields.protocol === "mixed") && <>{selectField("proxyAuth", text("认证方式", "Authentication"), [["noauth", text("无认证", "No auth")], ["password", text("用户名密码", "Username and password")]])}{areaField("protocolAccounts", text("账户（JSON 数组）", "Accounts (JSON array)"), { placeholder: '[{"user":"name","pass":"secret"}]' })}{fields.protocol !== "http" && checkField("proxyUdp", text("允许 UDP", "Allow UDP"))}{fields.protocol === "http" ? <>{checkField("httpAllowTransparent", text("允许透明代理", "Allow transparent proxy"))}{field("httpUserLevel", text("用户等级", "User level"), { type: "number", min: 0, step: 1 })}</> : field("proxyIp", text("本地 IP", "Local IP"), { placeholder: "127.0.0.1" })}</>}
+              {fields.protocol === "wireguard" && <>{field("wireguardSecretKey", text("WireGuard 私钥", "WireGuard secret key"))}{field("wireguardAddress", text("WireGuard 地址（CIDR，逗号分隔）", "WireGuard address (CIDR, comma separated)"))}{field("wireguardMtu", "MTU", { type: "number", min: 0, max: 65535, step: 1 })}{checkField("wireguardNoKernelTun", text("禁用内核 TUN", "Disable kernel TUN"))}{areaField("wireguardPeers", text("对端（JSON 数组）", "Peers (JSON array)"), { placeholder: '[{"publicKey":"…","allowedIPs":["0.0.0.0/0"]}]' })}{areaField("wireguardNoise", text("Noise 配置（JSON）", "Noise settings (JSON)"))}</>}
+              {(fields.protocol === "vless" || fields.protocol === "trojan") && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}
+            </>)}
 
-      {activeTab === "transport" && <div className="admin-form-block"><h3>{text("传输参数", "Transport options")}</h3><div className="admin-form-grid two-col">
-        {(fields.network === "tcp" || fields.network === "raw") && <>{selectField("tcpHeader", text("TCP 伪装类型", "TCP header type"), [["none", text("无", "None")], ["http", "HTTP"]])}{checkField("tcpAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{fields.tcpHeader === "http" && <>{areaField("tcpRequest", text("HTTP 请求头（JSON）", "HTTP request (JSON)"))}{areaField("tcpResponse", text("HTTP 响应头（JSON）", "HTTP response (JSON)"))}</>}</>}
-        {fields.network === "ws" && <>{field("wsPath", text("路径", "Path"))}{field("wsHost", text("Host（可选）", "Host (optional)"))}{field("wsHeartbeatPeriod", "heartbeatPeriod", { type: "number", min: 0, step: 1 })}{field("wsMaxEarlyData", "maxEarlyData", { type: "number", min: 0, step: 1 })}{field("wsEarlyDataHeaderName", "earlyDataHeaderName")}{checkField("wsAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{areaField("wsHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}</>}
-        {fields.network === "http" && <>{field("h2Path", text("路径", "Path"))}{field("h2Host", text("Hosts（逗号分隔）", "Hosts (comma separated)"))}{selectField("h2Method", text("HTTP 方法", "HTTP method"), [["PUT", "PUT"], ["GET", "GET"]])}{field("h2ReadIdleTimeout", "readIdleTimeout", { type: "number", min: 0, step: 1 })}{field("h2HealthCheckTimeout", "healthCheckTimeout", { type: "number", min: 0, step: 1 })}{areaField("h2Headers", text("请求头（JSON）", "Headers (JSON)"))}</>}
-        {fields.network === "httpupgrade" && <>{field("upgradePath", text("路径", "Path"))}{field("upgradeHost", text("Host（可选）", "Host (optional)"))}{checkField("upgradeAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{areaField("upgradeHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}</>}
-        {fields.network === "grpc" && <>{field("grpcService", text("gRPC 服务名", "gRPC service name"))}{field("grpcAuthority", text("gRPC authority", "gRPC authority"))}{field("grpcIdleTimeout", "idle_timeout", { type: "number", min: 0, step: 1 })}{field("grpcHealthCheckTimeout", "health_check_timeout", { type: "number", min: 0, step: 1 })}{field("grpcInitialWindowsSize", "initial_windows_size", { type: "number", min: 0, step: 1 })}{checkField("grpcMultiMode", text("多路复用模式", "Multi mode"))}{checkField("grpcPermitWithoutStream", "permit_without_stream")}</>}
-        {fields.network === "xhttp" && <>{field("xhttpPath", text("路径", "Path"))}{field("xhttpHost", text("Host（可选）", "Host (optional)"))}{selectField("xhttpMode", text("XHTTP 模式", "XHTTP mode"), xhttpModes.map((value): [string, string] => [value, value]))}{field("xhttpXPaddingBytes", "xPaddingBytes", { placeholder: "100-1000" })}{field("xhttpScMaxBufferedPosts", "scMaxBufferedPosts", { type: "number", min: 0, step: 1 })}{field("xhttpScMaxEachPostBytes", "scMaxEachPostBytes", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConcurrency", "xmux.maxConcurrency", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConnections", "xmux.maxConnections", { type: "number", min: 0, step: 1 })}{field("xhttpCMaxReuseTimes", "xmux.cMaxReuseTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHMaxRequestTimes", "xmux.hMaxRequestTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHKeepAlivePeriod", "xmux.hKeepAlivePeriod", { type: "number", min: 0, step: 1 })}{field("xhttpMaxLifetime", "xmux.maxLifetime", { type: "number", min: 0, step: 1 })}{checkField("xhttpNoGRPCHeader", "noGRPCHeader")}{areaField("xhttpHeaders", text("请求头（JSON）", "Headers (JSON)"))}</>}
-        {fields.network === "kcp" && <>{field("kcpMtu", "mtu", { type: "number", min: 576, max: 1460, step: 1 })}{field("kcpTti", "tti", { type: "number", min: 10, max: 100, step: 1 })}{field("kcpUplinkCapacity", "uplinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpDownlinkCapacity", "downlinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpCwndMultiplier", "cwndMultiplier", { type: "number", min: 0, step: 0.1 })}{field("kcpMaxSendingWindow", "maxSendingWindow", { type: "number", min: 0, step: 1 })}{field("kcpReadBufferSize", "readBufferSize", { type: "number", min: 0, step: 1 })}{field("kcpWriteBufferSize", "writeBufferSize", { type: "number", min: 0, step: 1 })}{selectField("kcpHeaderType", text("伪装类型", "Header type"), kcpHeaderTypes.map((value): [string, string] => [value, value]))}{field("kcpSeed", text("种子（可选）", "Seed (optional)"))}{checkField("kcpCongestion", text("启用拥塞控制", "Enable congestion control"))}</>}
-        {fields.network === "hysteria" && <>{field("hysteriaVersion", text("Hysteria 版本", "Hysteria version"), { type: "number", min: 1, max: 2, step: 1 })}{field("hysteriaAuth", text("认证字符串", "Auth string"))}{field("hysteriaUdpIdleTimeout", "udpIdleTimeout", { type: "number", min: 0, step: 1 })}{areaField("hysteriaMasquerade", text("伪装站点（JSON）", "Masquerade (JSON)"))}</>}
-      </div></div>}
+            {formSection(text("传输方式", "Transport"), <>
+              {selectField("network", text("传输方式", "Transport"), inboundNetworks.map((value): [string, string] => [value, inboundNetworkLabels[value] ?? value]))}
+              {(fields.network === "tcp" || fields.network === "raw") && <>{selectField("tcpHeader", text("TCP 伪装类型", "TCP header type"), [["none", text("无", "None")], ["http", "HTTP"]])}{checkField("tcpAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{fields.tcpHeader === "http" && <>{areaField("tcpRequest", text("HTTP 请求头（JSON）", "HTTP request (JSON)"))}{areaField("tcpResponse", text("HTTP 响应头（JSON）", "HTTP response (JSON)"))}</>}</>}
+              {fields.network === "ws" && <>{field("wsPath", text("路径", "Path"))}{field("wsHost", text("Host（可选）", "Host (optional)"))}{field("wsHeartbeatPeriod", "heartbeatPeriod", { type: "number", min: 0, step: 1 })}{field("wsMaxEarlyData", "maxEarlyData", { type: "number", min: 0, step: 1 })}{field("wsEarlyDataHeaderName", "earlyDataHeaderName")}{checkField("wsAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{areaField("wsHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}</>}
+              {fields.network === "http" && <>{field("h2Path", text("路径", "Path"))}{field("h2Host", text("Hosts（逗号分隔）", "Hosts (comma separated)"))}{selectField("h2Method", text("HTTP 方法", "HTTP method"), [["PUT", "PUT"], ["GET", "GET"]])}{field("h2ReadIdleTimeout", "readIdleTimeout", { type: "number", min: 0, step: 1 })}{field("h2HealthCheckTimeout", "healthCheckTimeout", { type: "number", min: 0, step: 1 })}{areaField("h2Headers", text("请求头（JSON）", "Headers (JSON)"))}</>}
+              {fields.network === "httpupgrade" && <>{field("upgradePath", text("路径", "Path"))}{field("upgradeHost", text("Host（可选）", "Host (optional)"))}{checkField("upgradeAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{areaField("upgradeHeaders", text("额外请求头（JSON）", "Extra headers (JSON)"))}</>}
+              {fields.network === "grpc" && <>{field("grpcService", text("gRPC 服务名", "gRPC service name"))}{field("grpcAuthority", text("gRPC authority", "gRPC authority"))}{field("grpcIdleTimeout", "idle_timeout", { type: "number", min: 0, step: 1 })}{field("grpcHealthCheckTimeout", "health_check_timeout", { type: "number", min: 0, step: 1 })}{field("grpcInitialWindowsSize", "initial_windows_size", { type: "number", min: 0, step: 1 })}{checkField("grpcMultiMode", text("多路复用模式", "Multi mode"))}{checkField("grpcPermitWithoutStream", "permit_without_stream")}</>}
+              {fields.network === "xhttp" && <>{field("xhttpPath", text("路径", "Path"))}{field("xhttpHost", text("Host（可选）", "Host (optional)"))}{selectField("xhttpMode", text("XHTTP 模式", "XHTTP mode"), xhttpModes.map((value): [string, string] => [value, value]))}{field("xhttpXPaddingBytes", "xPaddingBytes", { placeholder: "100-1000" })}{field("xhttpScMaxBufferedPosts", "scMaxBufferedPosts", { type: "number", min: 0, step: 1 })}{field("xhttpScMaxEachPostBytes", "scMaxEachPostBytes", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConcurrency", "xmux.maxConcurrency", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConnections", "xmux.maxConnections", { type: "number", min: 0, step: 1 })}{field("xhttpCMaxReuseTimes", "xmux.cMaxReuseTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHMaxRequestTimes", "xmux.hMaxRequestTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHKeepAlivePeriod", "xmux.hKeepAlivePeriod", { type: "number", min: 0, step: 1 })}{field("xhttpMaxLifetime", "xmux.maxLifetime", { type: "number", min: 0, step: 1 })}{checkField("xhttpNoGRPCHeader", "noGRPCHeader")}{areaField("xhttpHeaders", text("请求头（JSON）", "Headers (JSON)"))}</>}
+              {fields.network === "kcp" && <>{field("kcpMtu", "mtu", { type: "number", min: 576, max: 1460, step: 1 })}{field("kcpTti", "tti", { type: "number", min: 10, max: 100, step: 1 })}{field("kcpUplinkCapacity", "uplinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpDownlinkCapacity", "downlinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpCwndMultiplier", "cwndMultiplier", { type: "number", min: 0, step: 0.1 })}{field("kcpMaxSendingWindow", "maxSendingWindow", { type: "number", min: 0, step: 1 })}{field("kcpReadBufferSize", "readBufferSize", { type: "number", min: 0, step: 1 })}{field("kcpWriteBufferSize", "writeBufferSize", { type: "number", min: 0, step: 1 })}{selectField("kcpHeaderType", text("伪装类型", "Header type"), kcpHeaderTypes.map((value): [string, string] => [value, value]))}{field("kcpSeed", text("种子（可选）", "Seed (optional)"))}{checkField("kcpCongestion", text("启用拥塞控制", "Enable congestion control"))}</>}
+              {fields.network === "hysteria" && <>{field("hysteriaVersion", text("Hysteria 版本", "Hysteria version"), { type: "number", min: 1, max: 2, step: 1 })}{field("hysteriaAuth", text("认证字符串", "Auth string"))}{field("hysteriaUdpIdleTimeout", "udpIdleTimeout", { type: "number", min: 0, step: 1 })}{areaField("hysteriaMasquerade", text("伪装站点（JSON）", "Masquerade (JSON)"))}</>}
+            </>)}
 
-      {activeTab === "security" && <>
-        {fields.security === "none" && <div className="admin-form-block"><div className="admin-form-note">{text("当前不启用传输加密，TLS 与 REALITY 参数会被忽略。", "No transport encryption is enabled; TLS and REALITY settings are ignored.")}</div></div>}
-        {fields.security === "tls" && <>
-          {formSection(text("TLS 基础", "TLS basics"), <>
-            {field("tlsSni", text("TLS 服务器名（SNI）", "TLS server name (SNI)"))}
-            {field("tlsAlpn", text("ALPN（逗号分隔）", "ALPN (comma separated)"))}
-            {field("tlsCipherSuites", text("密码套件（逗号分隔）", "Cipher suites (comma separated)"))}
-            {field("tlsCurves", text("曲线（逗号分隔）", "Curves (comma separated)"))}
-            {selectField("tlsMinVersion", text("最低 TLS 版本", "Minimum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}
-            {selectField("tlsMaxVersion", text("最高 TLS 版本", "Maximum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}
-            {field("tlsFingerprint", text("uTLS 指纹", "uTLS fingerprint"), { placeholder: "chrome" })}
-            {field("tlsSessionResumption", text("会话恢复密钥", "Session resumption key"))}
-            {field("tlsMasterKeyLog", text("主密钥日志路径", "Master key log"))}
-            {checkField("tlsRejectUnknownSni", text("拒绝未知 SNI", "Reject unknown SNI"))}
-            {checkField("tlsDisableSystemRoot", text("禁用系统根证书", "Disable system root"))}
-          </>)}
-          {formSection(text("证书", "Certificates"), <>
-            {field("tlsCertFile", text("证书文件路径", "Certificate file path"))}
-            {field("tlsKeyFile", text("私钥文件路径", "Private key file path"))}
-            {selectField("tlsCertUsage", text("证书用途", "Certificate usage"), withDefault(certificateUsages.map((value): [string, string] => [value, value])))}
-            {areaField("tlsCertPem", text("证书内容（PEM，可选）", "Certificate PEM (optional)"))}
-            {areaField("tlsKeyPem", text("私钥内容（PEM，可选）", "Private key PEM (optional)"))}
-            {checkField("tlsCertOcspStapling", text("启用 OCSP 装订", "OCSP stapling"))}
-            {checkField("tlsCertOneTimeLoading", text("仅加载一次", "One-time loading"))}
-            {checkField("tlsCertBuildChain", text("构建证书链", "Build chain"))}
-            {areaField("tlsCertificates", text("多证书（JSON 数组，优先使用）", "Additional certificates (JSON array, takes precedence)"))}
-          </>)}
-          {formSection(text("高级", "Advanced"), <>
-            {areaField("tlsEchSockopt", text("ECH sockopt（JSON）", "ECH sockopt (JSON)"))}
-          </>)}
-        </>}
-        {fields.security === "reality" && formSection("REALITY", <>
-          {field("realityDest", text("REALITY 目标地址", "REALITY destination"), { placeholder: "www.example.com:443" })}
-          {field("realitySni", text("REALITY 服务器名（逗号分隔）", "REALITY server names (comma separated)"))}
-          {field("realityPrivateKey", text("REALITY 私钥", "REALITY private key"))}
-          {field("realityPublicKey", text("REALITY 公钥", "REALITY public key"))}
-          {field("realityShortIds", text("Short ID（逗号分隔）", "Short IDs (comma separated)"))}
-          {selectField("realityFingerprint", text("uTLS 指纹", "uTLS fingerprint"), [["chrome", "Chrome"], ["firefox", "Firefox"], ["safari", "Safari"], ["ios", "iOS"], ["android", "Android"], ["edge", "Edge"], ["random", "Random"]])}
-          {field("realitySpiderX", text("SpiderX 路径", "SpiderX path"))}
-          {field("realityXver", text("Xver 版本", "Xver"), { type: "number", min: 0, max: 2, step: 1 })}
-          {field("realityMinClientVer", text("最低客户端版本", "Minimum client version"))}
-          {field("realityMaxClientVer", text("最高客户端版本", "Maximum client version"))}
-          {field("realityMaxTimediff", text("最大时间差（毫秒）", "Maximum time difference (ms)"), { type: "number", min: 0, step: 1 })}
-          {field("realityMldsa65Seed", text("ML-DSA-65 种子", "ML-DSA-65 seed"))}
-          {field("realityMldsa65Verify", text("ML-DSA-65 校验", "ML-DSA-65 verify"))}
-          {checkField("realityShow", text("在日志中显示调试信息", "Show debug output"))}
-        </>)}
-      </>}
+            {formSection(text("传输安全", "Transport security"), <>
+              {selectField("security", text("传输安全", "Transport security"), [["none", text("无", "None")], ["tls", "TLS"], ["reality", "REALITY"]])}
+              {fields.security === "none" && <div className="admin-form-wide admin-form-note">{text("当前不启用传输加密，TLS 与 REALITY 参数会被忽略。", "No transport encryption is enabled; TLS and REALITY settings are ignored.")}</div>}
+              {fields.security === "tls" && <>{field("tlsSni", text("TLS 服务器名（SNI）", "TLS server name (SNI)"))}{field("tlsAlpn", text("ALPN（逗号分隔）", "ALPN (comma separated)"))}{field("tlsCipherSuites", text("密码套件（逗号分隔）", "Cipher suites (comma separated)"))}{field("tlsCurves", text("曲线（逗号分隔）", "Curves (comma separated)"))}{selectField("tlsMinVersion", text("最低 TLS 版本", "Minimum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}{selectField("tlsMaxVersion", text("最高 TLS 版本", "Maximum TLS version"), withDefault(tlsVersions.map((value): [string, string] => [value, value])))}{field("tlsFingerprint", text("uTLS 指纹", "uTLS fingerprint"), { placeholder: "chrome" })}{field("tlsSessionResumption", text("会话恢复密钥", "Session resumption key"))}{field("tlsMasterKeyLog", text("主密钥日志路径", "Master key log"))}{checkField("tlsRejectUnknownSni", text("拒绝未知 SNI", "Reject unknown SNI"))}{checkField("tlsDisableSystemRoot", text("禁用系统根证书", "Disable system root"))}</>}
+            </>)}
 
-      {activeTab === "sniffing" && formSection(text("嗅探参数", "Sniffing options"), <>
-        {checkField("sniffEnabled", text("启用流量嗅探", "Enable sniffing"))}
-        {checkField("sniffMetadataOnly", text("仅元数据", "Metadata only"))}
-        {checkField("sniffRouteOnly", text("仅用于路由", "Route only"))}
-        {checkListField("sniffDest", inboundSniffTargets, text("嗅探目标", "Sniffing targets"))}
-        {field("sniffDomainsExcluded", text("排除域名（逗号分隔）", "Excluded domains (comma separated)"))}
-        {field("sniffIpsExcluded", text("排除 IP（逗号分隔）", "Excluded IPs (comma separated)"))}
-      </>)}
+            {fields.security === "tls" && formSection(text("证书", "Certificates"), <>
+              {field("tlsCertFile", text("证书文件路径", "Certificate file path"))}
+              {field("tlsKeyFile", text("私钥文件路径", "Private key file path"))}
+              {selectField("tlsCertUsage", text("证书用途", "Certificate usage"), withDefault(certificateUsages.map((value): [string, string] => [value, value])))}
+              {areaField("tlsCertPem", text("证书内容（PEM，可选）", "Certificate PEM (optional)"))}
+              {areaField("tlsKeyPem", text("私钥内容（PEM，可选）", "Private key PEM (optional)"))}
+              {checkField("tlsCertOcspStapling", text("启用 OCSP 装订", "OCSP stapling"))}
+              {checkField("tlsCertOneTimeLoading", text("仅加载一次", "One-time loading"))}
+              {checkField("tlsCertBuildChain", text("构建证书链", "Build chain"))}
+              {checkField("tlsRejectUnknownSni", text("拒绝未知 SNI", "Reject unknown SNI"))}
+              {areaField("tlsCertificates", text("多证书（JSON 数组，优先使用）", "Additional certificates (JSON array, takes precedence)"))}
+              {areaField("tlsEchSockopt", text("ECH sockopt（JSON）", "ECH sockopt (JSON)"))}
+            </>)}
 
-      {activeTab === "advanced" && <>
-        {formSection(text("Socket 参数", "Socket options"), <>
-          {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
-          {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
-          {selectField("sockDomainStrategy", text("域名解析策略", "Domain strategy"), withDefault(domainStrategies.map((value): [string, string] => [value, value])))}
-          {field("sockDialerProxy", "dialerProxy")}
-          {field("sockInterface", text("网卡名称", "Network interface"))}
-          {field("sockMark", "mark", { type: "number", min: 0, step: 1 })}
-          {field("sockTcpKeepAliveIdle", "tcpKeepAliveIdle", { type: "number", min: 0, step: 1 })}
-          {field("sockTcpKeepAliveInterval", "tcpKeepAliveInterval", { type: "number", min: 0, step: 1 })}
-          {field("sockTcpUserTimeout", "tcpUserTimeout", { type: "number", min: 0, step: 1 })}
-          {field("sockTcpWindowClamp", "tcpWindowClamp", { type: "number", min: 0, step: 1 })}
-          {field("sockTcpMaxSeg", "tcpMaxSeg", { type: "number", min: 0, step: 1 })}
-          {field("sockHappyEyeballsTryDelayMs", "happyEyeballs.tryDelayMs", { type: "number", min: 0, step: 1 })}
-          {field("sockHappyEyeballsMaxConcurrentTry", "happyEyeballs.maxConcurrentTry", { type: "number", min: 0, step: 1 })}
-          {checkField("sockTcpFastOpen", "tcpFastOpen")}
-          {checkField("sockTcpNoDelay", "tcpNoDelay")}
-          {checkField("sockTcpMptcp", "tcpMptcp")}
-          {checkField("sockHappyEyeballsPrioritizeIPv4", "happyEyeballs.prioritizeIPv4")}
-          {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
-          {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
-        </>)}
-        {formSection(text("最终掩码", "Final masks"), <>
-          {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
-          {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
-        </>)}
-        {formSection(text("原始配置", "Raw config"), <>
-          {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
-        </>)}
-      </>}
-      </div>
-    </>}
+            {fields.security === "reality" && formSection("REALITY", <>
+              {field("realityDest", text("REALITY 目标地址", "REALITY destination"), { placeholder: "www.example.com:443" })}
+              {field("realitySni", text("REALITY 服务器名（逗号分隔）", "REALITY server names (comma separated)"))}
+              {field("realityPrivateKey", text("REALITY 私钥", "REALITY private key"))}
+              {field("realityPublicKey", text("REALITY 公钥", "REALITY public key"))}
+              {field("realityShortIds", text("Short ID（逗号分隔）", "Short IDs (comma separated)"))}
+              {selectField("realityFingerprint", text("uTLS 指纹", "uTLS fingerprint"), [["chrome", "Chrome"], ["firefox", "Firefox"], ["safari", "Safari"], ["ios", "iOS"], ["android", "Android"], ["edge", "Edge"], ["random", "Random"]])}
+              {field("realitySpiderX", text("SpiderX 路径", "SpiderX path"))}
+              {field("realityXver", text("Xver 版本", "Xver"), { type: "number", min: 0, max: 2, step: 1 })}
+              {field("realityMinClientVer", text("最低客户端版本", "Minimum client version"))}
+              {field("realityMaxClientVer", text("最高客户端版本", "Maximum client version"))}
+              {field("realityMaxTimediff", text("最大时间差（毫秒）", "Maximum time difference (ms)"), { type: "number", min: 0, step: 1 })}
+              {field("realityMldsa65Seed", text("ML-DSA-65 种子", "ML-DSA-65 seed"))}
+              {field("realityMldsa65Verify", text("ML-DSA-65 校验", "ML-DSA-65 verify"))}
+              {checkField("realityShow", text("在日志中显示调试信息", "Show debug output"))}
+            </>)}
+
+            {formSection(text("流量嗅探", "Sniffing"), <>
+              {checkField("sniffEnabled", text("启用流量嗅探", "Enable sniffing"))}
+              {checkField("sniffMetadataOnly", text("仅元数据", "Metadata only"))}
+              {checkField("sniffRouteOnly", text("仅用于路由", "Route only"))}
+              {checkListField("sniffDest", inboundSniffTargets, text("嗅探目标", "Sniffing targets"))}
+              {field("sniffDomainsExcluded", text("排除域名（逗号分隔）", "Excluded domains (comma separated)"))}
+              {field("sniffIpsExcluded", text("排除 IP（逗号分隔）", "Excluded IPs (comma separated)"))}
+            </>)}
+
+            <details className="inbound-advanced">
+              <summary>{text("高级与系统设置", "Advanced and system settings")}</summary>
+              {formSection(text("权限与同步", "Access and sync"), <>
+                {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
+                {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
+                {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
+                {checkField("enabled", text("启用入站", "Inbound enabled"))}
+                {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
+              </>)}
+              {formSection(text("订阅与分享", "Subscription and sharing"), <>
+                {field("tag", text("标签", "Tag"), { maxLength: 64 })}
+                {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
+                {selectField("shareAddrStrategy", text("分享地址策略", "Share address strategy"), [["node", text("使用节点地址", "Use the node address")], ["listen", text("使用监听地址", "Use the listen address")], ["custom", text("自定义地址", "Custom address")]])}
+                {fields.shareAddrStrategy === "custom" && field("shareAddr", text("自定义分享地址", "Custom share address"), { maxLength: 255 })}
+                {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
+                {checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
+              </>)}
+              {formSection(text("Socket 参数", "Socket options"), <>
+                {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
+                {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
+                {selectField("sockDomainStrategy", text("域名解析策略", "Domain strategy"), withDefault(domainStrategies.map((value): [string, string] => [value, value])))}
+                {field("sockDialerProxy", "dialerProxy")}
+                {field("sockInterface", text("网卡名称", "Network interface"))}
+                {field("sockMark", "mark", { type: "number", min: 0, step: 1 })}
+                {field("sockTcpKeepAliveIdle", "tcpKeepAliveIdle", { type: "number", min: 0, step: 1 })}
+                {field("sockTcpKeepAliveInterval", "tcpKeepAliveInterval", { type: "number", min: 0, step: 1 })}
+                {field("sockTcpUserTimeout", "tcpUserTimeout", { type: "number", min: 0, step: 1 })}
+                {field("sockTcpWindowClamp", "tcpWindowClamp", { type: "number", min: 0, step: 1 })}
+                {field("sockTcpMaxSeg", "tcpMaxSeg", { type: "number", min: 0, step: 1 })}
+                {field("sockHappyEyeballsTryDelayMs", "happyEyeballs.tryDelayMs", { type: "number", min: 0, step: 1 })}
+                {field("sockHappyEyeballsMaxConcurrentTry", "happyEyeballs.maxConcurrentTry", { type: "number", min: 0, step: 1 })}
+                {checkField("sockTcpFastOpen", "tcpFastOpen")}
+                {checkField("sockTcpNoDelay", "tcpNoDelay")}
+                {checkField("sockTcpMptcp", "tcpMptcp")}
+                {checkField("sockHappyEyeballsPrioritizeIPv4", "happyEyeballs.prioritizeIPv4")}
+                {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
+                {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
+              </>)}
+              <details className="inbound-advanced inbound-advanced-nested">
+                <summary>{text("原始 JSON", "Raw JSON")}</summary>
+                {formSection(text("原始配置", "Raw config"), <>
+                  {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
+                  {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
+                  {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
+                  {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
+                </>)}
+              </details>
+            </details>
+          </div>
+
+          <aside className="inbound-clients" aria-label={text("客户端", "Clients")}>
+            <div className="inbound-clients-head">
+              <div>
+                <h3>{text("客户端", "Clients")} <b>{clients.length}</b></h3>
+                <p>{text("与面板一致：每个客户端独立邮箱、限额与到期时间。", "Same as the panel: each client has its own email, quota and expiry.")}</p>
+              </div>
+              <button className="outline-button small" type="button" onClick={addClient}><Plus size={13} /> {text("添加", "Add")}</button>
+            </div>
+            {(inboundClientProtocols as readonly string[]).includes(String(fields.protocol)) ? <>
+              {clients.length === 0 && <div className="inbound-clients-empty">{text("还没有客户端。点「添加」新建；套餐同步生成时也会自动出现在这里。", "No clients yet. Use Add, or wait for plan provisioning to create them.")}</div>}
+              {clients.map((client) => <article className="inbound-client" key={client.key}>
+                <div className="inbound-client-head">
+                  <input aria-label={text("客户端邮箱", "Client email")} value={client.email} placeholder="client@example.com" onChange={(event) => updateClient(client.key, { email: event.target.value })} />
+                  <label className="admin-form-check"><input type="checkbox" checked={client.enable} onChange={(event) => updateClient(client.key, { enable: event.target.checked })} /><span>{text("启用", "On")}</span></label>
+                  <button className="quiet-icon danger" type="button" aria-label={text("删除客户端", "Delete client")} onClick={() => removeClient(client.key)}><Trash2 size={14} /></button>
+                </div>
+                <div className="inbound-client-grid">
+                  {(fields.protocol === "vless" || fields.protocol === "vmess") && <label className="inbound-client-wide"><span>ID</span><div className="inbound-client-inline"><input value={client.id} onChange={(event) => updateClient(client.key, { id: event.target.value })} /><button className="outline-button small" type="button" onClick={() => updateClient(client.key, { id: crypto.randomUUID() })}>{text("生成", "New")}</button></div></label>}
+                  {(fields.protocol === "trojan" || fields.protocol === "shadowsocks") && <label className="inbound-client-wide"><span>{text("密码", "Password")}</span><div className="inbound-client-inline"><input value={client.password} onChange={(event) => updateClient(client.key, { password: event.target.value })} /><button className="outline-button small" type="button" onClick={() => updateClient(client.key, { password: randomClientSecret() })}>{text("生成", "New")}</button></div></label>}
+                  {fields.protocol === "vless" && <label><span>Flow</span><select value={client.flow} onChange={(event) => updateClient(client.key, { flow: event.target.value })}><option value="">{text("无", "None")}</option><option value="xtls-rprx-vision">xtls-rprx-vision</option><option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option></select></label>}
+                  <label><span>{text("限制 IP", "Limit IP")}</span><input type="number" min={0} step={1} value={client.limitIp} onChange={(event) => updateClient(client.key, { limitIp: event.target.value })} /></label>
+                  <label><span>{text("总流量（GB）", "Total (GB)")}</span><input type="number" min={0} step={0.001} value={client.totalGb} onChange={(event) => updateClient(client.key, { totalGb: event.target.value })} /></label>
+                  <label className="inbound-client-wide"><span>{text("到期时间", "Expiry")}</span><input type="datetime-local" value={client.expiry} onChange={(event) => updateClient(client.key, { expiry: event.target.value })} /></label>
+                  <label><span>{text("重置周期（天）", "Reset (days)")}</span><input type="number" min={0} step={1} value={client.reset} onChange={(event) => updateClient(client.key, { reset: event.target.value })} /></label>
+                  <label><span>Sub ID</span><input value={client.subId} onChange={(event) => updateClient(client.key, { subId: event.target.value })} /></label>
+                </div>
+              </article>)}
+              <p className="inbound-clients-note">{text("套餐同步生成的客户端邮箱形如 u_<用户ID>_<入站ID>，由系统按套餐续期覆盖；手工改动会在下次同步时恢复。", "Plan-managed clients use emails like u_<user>_<inbound> and are rewritten on each sync; manual edits to them are overwritten.")}</p>
+            </> : <div className="inbound-clients-empty">{text("该协议不使用客户端列表，账户/密码在左侧「协议设置」中维护。", "This protocol does not use a client list; accounts are configured under Protocol settings.")}</div>}
+          </aside>
+        </div>}
     {kind === "user" && (initial ? <>
       {formSection(text("账户信息", "Account"), <>
         <label><span>{text("邮箱", "Email")}</span><input value={String(fields.email)} readOnly /></label>
