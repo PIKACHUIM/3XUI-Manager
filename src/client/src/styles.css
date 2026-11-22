@@ -237,7 +237,7 @@
 .inbound-tabs button.active{background:rgba(var(--accent-rgb),.14);color:var(--accent)}
 .inbound-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .admin-form-tabpanel[hidden]{display:none}
-@media(max-width:760px){.inbound-tabs{flex-wrap:nowrap;overflow:auto}.inbound-tabs button{flex:0 0 auto}}
+@media(max-width:760px){.inbound-tabs{flex-wrap:wrap}.inbound-tabs button{flex:0 0 auto}}
 .inbound-advanced{border:1px solid var(--border);border-radius:12px;background:var(--surface-inset)}
 .inbound-advanced>summary{cursor:pointer;list-style:none;padding:13px 14px;color:var(--text-secondary);font:600 10px var(--font-display);letter-spacing:.09em;text-transform:uppercase}
 .inbound-advanced>summary::-webkit-details-marker{display:none}
