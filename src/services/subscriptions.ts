@@ -57,7 +57,7 @@ function address(inbound: Inbound, node: NodeRecord): string {
   return shareHost(node.publicAddress);
 }
 interface ProxyEntry { clash: Record<string, unknown>; uri: string; ss?: Record<string, unknown> }
-export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecord, mapping: ClientMapping, key: string): Promise<ProxyEntry | null> {
+export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecord, mapping: ClientMapping, key: string, displayName?: string): Promise<ProxyEntry | null> {
   const server = address(inbound, node);
   if (!server || !Number.isInteger(inbound.port) || inbound.port < 1 || inbound.port > 65535) return null;
   const protocol = inbound.protocol.toLowerCase();
@@ -69,7 +69,7 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
   if (network === "tcp" && text(object(object(stream.tcpSettings).header).type) && object(object(stream.tcpSettings).header).type !== "none") return null;
   if (security === "reality" && (protocol !== "vless" || network !== "tcp")) return null;
   if (protocol === "trojan" && security !== "tls") return null;
-  const name = `${inbound.name} · ${node.name} (${inbound.id}/${node.id})`;
+  const name = displayName?.trim() || `${inbound.name} · ${node.name} (${inbound.id}/${node.id})`;
   const clash: Record<string, unknown> = { name, type: protocol === "shadowsocks" ? "ss" : protocol, server, port: inbound.port, udp: true };
   const params = new URLSearchParams({ type: network, security });
   let secret = mapping.clientId;
@@ -155,12 +155,143 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
     : `${protocol}://${encodeURIComponent(secret)}@${authority}?${params}#${encodeURIComponent(name)}`;
   return { clash, uri };
 }
+/** Serialises a plain object tree as YAML; JSON quoting keeps every string valid in double-quoted YAML. */
+function yamlScalar(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+function yamlLines(value: unknown, indent: number): string[] {
+  const pad = "  ".repeat(indent);
+  const inline = (items: unknown[]) => items.every((item) => !item || typeof item !== "object") && items.map(yamlScalar).join(", ").length <= 80;
+  if (Array.isArray(value)) {
+    if (!value.length) return [`${pad}[]`];
+    if (inline(value)) return [`${pad}[${value.map(yamlScalar).join(", ")}]`];
+    return value.map((item) => {
+      if (!item || typeof item !== "object") return `${pad}- ${yamlScalar(item)}`;
+      const lines = yamlLines(item, indent + 1);
+      return [`${pad}- ${(lines[0] ?? "").trimStart()}`, ...lines.slice(1)].join("\n");
+    });
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (!entries.length) return [`${pad}{}`];
+    return entries.flatMap(([key, child]) => {
+      const label = /^[A-Za-z0-9_.-]+$/.test(key) ? key : JSON.stringify(key);
+      if (Array.isArray(child) && inline(child)) return [`${pad}${label}: [${child.map(yamlScalar).join(", ")}]`];
+      if (child && typeof child === "object") return [`${pad}${label}:`, ...yamlLines(child, indent + 1)];
+      return [`${pad}${label}: ${yamlScalar(child)}`];
+    });
+  }
+  return [`${pad}${yamlScalar(value)}`];
+}
+
+const CLASH_SELECT = "🚀 节点选择";
+const CLASH_AUTO = "♻️ 自动选择";
+const CLASH_FALLBACK = "🚑 故障转移";
+const CLASH_HEALTH_URL = "http://cp.cloudflare.com/generate_204";
+const clashRegionGroup = (region: string) => `📍 ${region}`;
+/** Category groups and their initially selected target, mirroring common Clash rule sets. */
+const clashCategories: Array<[string, string]> = [
+  ["🎬 爱奇艺&哔哩哔哩", "DIRECT"],
+  ["📺 动画疯", CLASH_SELECT],
+  ["🎮 Steam 登录/下载", "DIRECT"],
+  ["🛒 Steam 商店/社区", CLASH_SELECT],
+  ["☁️ Cloudflare", CLASH_SELECT],
+  ["📁 OneDrive", CLASH_SELECT],
+  ["🎓 学术网站", CLASH_SELECT],
+  ["🇨🇳 国内网站", "DIRECT"],
+  ["🛑 拦截广告", "REJECT"],
+  ["🐟 漏网之鱼", CLASH_SELECT],
+];
+const clashCategory = (suffix: string) => clashCategories.find(([name]) => name.includes(suffix))?.[0] ?? "";
+const clashRules: string[] = [
+  "DOMAIN-SUFFIX,local,DIRECT", "DOMAIN-SUFFIX,lan,DIRECT",
+  "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+  "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve", "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve", "IP-CIDR,224.0.0.0/4,DIRECT,no-resolve",
+  "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
+  ...[
+    "doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.google.com", "adcolony.com",
+    "applovin.com", "unityads.unity3d.com", "umeng.com", "cnzz.com", "hm.baidu.com", "adnxs.com", "adsrvr.org",
+    "criteo.com", "taboola.com", "outbrain.com", "ads.youtube.com", "ads.twitter.com",
+  ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("拦截广告")}`),
+  ...[
+    "iqiyi.com", "iq.com", "bilibili.com", "bilivideo.com", "biliapi.net", "hdslb.com",
+  ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("爱奇艺")}`),
+  `DOMAIN-KEYWORD,bilibili,${clashCategory("爱奇艺")}`,
+  ...[ "bahamut.com.tw", "gamer.com.tw" ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("动画疯")}`),
+  `DOMAIN-KEYWORD,bahamut,${clashCategory("动画疯")}`,
+  ...[ "steamcontent.com", "steamstatic.com", "steamcdn-a.akamaihd.net" ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("Steam 登录")}`),
+  ...[ "steampowered.com", "steamcommunity.com", "steamusercontent.com" ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("Steam 商店")}`),
+  ...[ "cloudflare.com", "cloudflare-dns.com", "cloudflareclient.com", "workers.dev", "cloudflarestream.com" ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("Cloudflare")}`),
+  ...[ "onedrive.com", "onedrive.live.com", "1drv.com", "1drv.ms", "sharepoint.com" ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("OneDrive")}`),
+  ...[
+    "scholar.google.com", "arxiv.org", "nature.com", "science.org", "sciencedirect.com", "springer.com",
+    "ieee.org", "acm.org", "researchgate.net", "jstor.org", "semanticscholar.org", "mdpi.com", "webofscience.com",
+  ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("学术网站")}`),
+  `DOMAIN-KEYWORD,sci-hub,${clashCategory("学术网站")}`,
+  ...[ "baidu.com", "taobao.com", "jd.com", "weixin.qq.com", "alicdn.com", "126.net", "cn" ].map((domain) => `DOMAIN-SUFFIX,${domain},${clashCategory("国内网站")}`),
+  `GEOIP,CN,${clashCategory("国内网站")}`,
+  `MATCH,${clashCategory("漏网之鱼")}`,
+];
+const clashDns = {
+  enable: true,
+  ipv6: false,
+  "enhanced-mode": "fake-ip",
+  "fake-ip-range": "198.18.0.1/16",
+  "fake-ip-filter": ["*.lan", "*.local", "*.localdomain", "localhost.ptlogin2.qq.com", "+.msftconnecttest.com", "+.msftncsi.com"],
+  "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+  nameserver: ["https://doh.pub/dns-query", "https://dns.alidns.com/dns-query"],
+  fallback: ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"],
+  "fallback-filter": { geoip: true, "geoip-code": "CN", ipcidr: ["240.0.0.0/4"] },
+};
+/**
+ * A full Clash / Mihomo profile: general options, fake-ip DNS, the proxies, a select/url-test/fallback
+ * stack with region groups, and the usual rule categories so the profile works without a converter.
+ */
+function renderClashConfig(entries: Array<{ proxy: Record<string, unknown>; region: string }>): string {
+  const proxies = entries.map((entry) => entry.proxy);
+  const names = proxies.map((proxy) => String(proxy.name));
+  const regions = new Map<string, string[]>();
+  entries.forEach((entry, index) => {
+    if (!entry.region || names.includes(entry.region)) return;
+    regions.set(entry.region, [...(regions.get(entry.region) ?? []), names[index] ?? ""]);
+  });
+  const regionGroups = [...regions.entries()].filter(([, members]) => members.length > 1);
+  const groups: Array<Record<string, unknown>> = [
+    { name: CLASH_SELECT, type: "select", proxies: names.length ? [CLASH_AUTO, CLASH_FALLBACK, ...regionGroups.map(([region]) => clashRegionGroup(region)), ...names] : ["DIRECT"] },
+  ];
+  if (names.length) {
+    groups.push({ name: CLASH_AUTO, type: "url-test", url: CLASH_HEALTH_URL, interval: 300, tolerance: 50, proxies: [...names] });
+    groups.push({ name: CLASH_FALLBACK, type: "fallback", url: CLASH_HEALTH_URL, interval: 300, proxies: [...names] });
+  }
+  for (const [region, members] of regionGroups) groups.push({ name: clashRegionGroup(region), type: "select", proxies: [...members, "DIRECT"] });
+  for (const [name, selected] of clashCategories) {
+    const options = selected === "REJECT" ? ["REJECT", "DIRECT", CLASH_SELECT] : selected === CLASH_SELECT ? [CLASH_SELECT, "DIRECT"] : ["DIRECT", CLASH_SELECT];
+    groups.push({ name, type: "select", proxies: options });
+  }
+  const config = {
+    "mixed-port": 7890,
+    "allow-lan": false,
+    mode: "rule",
+    "log-level": "info",
+    ipv6: false,
+    "external-controller": "127.0.0.1:9090",
+    dns: clashDns,
+    proxies,
+    "proxy-groups": groups,
+    rules: clashRules,
+  };
+  return ["# 3XUI Manager · Clash / Mihomo 订阅配置", ...yamlLines(config, 0)].join("\n") + "\n";
+}
 export async function renderSubscription(store: DocumentStore, user: User, key: string, format: SubscriptionFormat): Promise<{ body: string; contentType: string; count: number; skipped: number }> {
   const [inbounds, nodes, bindings, mappings] = await Promise.all([
     listCollection<Inbound>(store, "inbounds"), listCollection<NodeRecord>(store, "nodes"),
     listCollection<InboundNodeBinding>(store, "inbound-node-bindings"), listCollection<ClientMapping>(store, "clients", `${user.id}:`),
   ]);
-  const entries: ProxyEntry[] = []; let skipped = 0;
+  const entries: Array<{ entry: ProxyEntry; region: string }> = []; let skipped = 0;
+  const usedNames = new Set<string>(clashCategories.map(([name]) => name));
   for (const inbound of inbounds.sort((a, b) => (a.subSortIndex ?? 0) - (b.subSortIndex ?? 0))) {
     if (!servesPlan(inbound, user) || inbound.excludeFromSub || (inbound.expiryTime && inbound.expiryTime <= Date.now())) continue;
     const mapping = mappings.find(m => m.inboundId === inbound.id && m.userId === user.id);
@@ -170,13 +301,17 @@ export async function renderSubscription(store: DocumentStore, user: User, key: 
     for (const binding of bindings.filter(b => b.inboundId === inbound.id && b.panelInboundId > 0)) {
       const node = nodes.find(n => n.id === binding.nodeId);
       if (!node?.enabled || !mapping.syncedNodes.includes(node.id)) continue;
-      const entry = await convertSubscriptionEntry(inbound, node, mapping, key);
-      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push(entry); else skipped++;
+      const base = `${inbound.name} · ${node.name}`;
+      let name = base;
+      for (let suffix = 2; usedNames.has(name); suffix += 1) name = `${base} #${suffix}`;
+      usedNames.add(name);
+      const entry = await convertSubscriptionEntry(inbound, node, mapping, key, name);
+      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push({ entry, region: text(node.region).trim() }); else skipped++;
     }
   }
   let body: string;
-  if (format === "clash") body = JSON.stringify({ proxies: entries.map(e => e.clash), "proxy-groups": [{ name: "Subscription", type: "select", proxies: entries.map(e => e.clash.name) }], rules: ["MATCH,Subscription"] }, null, 2);
-  else if (format === "v2ray") body = base64(entries.map(e => e.uri).join("\n"));
-  else body = JSON.stringify({ version: 1, servers: entries.map(e => e.ss) }, null, 2);
+  if (format === "clash") body = renderClashConfig(entries.map(({ entry, region }) => ({ proxy: entry.clash, region })));
+  else if (format === "v2ray") body = base64(entries.map(({ entry }) => entry.uri).join("\n"));
+  else body = JSON.stringify({ version: 1, servers: entries.map(({ entry }) => entry.ss) }, null, 2);
   return { body, contentType: format === "clash" ? "application/yaml; charset=utf-8" : format === "v2ray" ? "text/plain; charset=utf-8" : "application/json; charset=utf-8", count: entries.length, skipped };
 }

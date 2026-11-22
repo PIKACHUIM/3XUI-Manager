@@ -105,6 +105,48 @@ describe("subscription formats", () => {
     await store.put("clients", "u:i", mapping); await store.put("nodes", "n", { ...node, enabled: false });
     expect((await renderSubscription(store, user, key, "clash")).count).toBe(0);
   });
+  it("renders a full clash profile with settings, groups and rule categories", async () => {
+    const { store } = await setup();
+    await store.put("nodes", "n", { ...node, region: "日本" } as NodeRecord);
+    await store.put("nodes", "n2", { ...node, id: "n2", name: "Osaka", region: "日本" } as NodeRecord);
+    await store.put("inbound-node-bindings", "i:n2", { inboundId: "i", nodeId: "n2", panelInboundId: 2 });
+    await store.put("clients", "u:i", { ...mapping, syncedNodes: ["n", "n2"] });
+
+    const rendered = await renderSubscription(store, user, key, "clash");
+    expect(rendered.count).toBe(2);
+    expect(rendered.contentType).toContain("application/yaml");
+    const body = rendered.body;
+    expect(body.startsWith("# 3XUI Manager")).toBe(true);
+    for (const line of [
+      "mixed-port: 7890", 'mode: "rule"', "external-controller:", "dns:", 'enhanced-mode: "fake-ip"',
+      "proxies:", "proxy-groups:", "rules:", '"🚀 节点选择"', '"♻️ 自动选择"', '"🚑 故障转移"', '"📍 日本"',
+      '"🎬 爱奇艺&哔哩哔哩"', '"🛑 拦截广告"', "MATCH,🐟 漏网之鱼", "GEOIP,CN,🇨🇳 国内网站",
+    ]) expect(body).toContain(line);
+    expect(body).toContain('"日本 · Tokyo"');
+    expect(body).toContain('"日本 · Osaka"');
+    expect(body).not.toContain("Subscription");
+  });
+  it("keeps proxy names unique so a duplicate inbound and node pair still loads", async () => {
+    const { store } = await setup();
+    await store.put("inbounds", "i2", { ...inbound, id: "i2" });
+    await store.put("inbound-node-bindings", "i2:n", { inboundId: "i2", nodeId: "n", panelInboundId: 2 });
+    await store.put("clients", "u:i2", { ...mapping, id: "u:i2", inboundId: "i2" });
+
+    const body = (await renderSubscription(store, user, key, "clash")).body;
+    expect(body).toContain('"日本 · Tokyo"');
+    expect(body).toContain('"日本 · Tokyo #2"');
+  });
+  it("renders an empty clash profile that still points at DIRECT", async () => {
+    const { store } = await setup();
+    await store.put("clients", "u:i", { ...mapping, enable: false });
+
+    const rendered = await renderSubscription(store, user, key, "clash");
+    expect(rendered.count).toBe(0);
+    expect(rendered.body).toContain("proxies: []");
+    expect(rendered.body).toContain('proxies: ["DIRECT"]');
+    expect(rendered.body).not.toContain("♻️ 自动选择\"");
+    expect(rendered.body).toContain("MATCH,🐟 漏网之鱼");
+  });
   it("serves inbounds bound to the user's current plan and hides the rest", async () => {
     const { store } = await setup();
     await store.put("inbounds", "i", { ...inbound, planIds: ["p"] });
