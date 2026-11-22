@@ -1,5 +1,6 @@
 import { servesPlan } from "../domain/defaults";
 import { decryptSecret, encryptSecret, randomToken, sha256 } from "../domain/security";
+import { wireGuardPublicKey } from "../domain/wireguard";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, Plan, User } from "../domain/types";
 import type { DocumentStore } from "../storage/store";
 import { listCollection } from "./xui-sync";
@@ -61,7 +62,29 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
   const server = address(inbound, node);
   if (!server || !Number.isInteger(inbound.port) || inbound.port < 1 || inbound.port > 65535) return null;
   const protocol = inbound.protocol.toLowerCase();
-  if (!["vmess", "vless", "trojan", "shadowsocks"].includes(protocol)) return null;
+  if (!["vmess", "vless", "trojan", "shadowsocks", "wireguard"].includes(protocol)) return null;
+  const name = displayName?.trim() || `${inbound.name} · ${node.name} (${inbound.id}/${node.id})`;
+  const authority = `${server.includes(":") ? `[${server}]` : server}:${inbound.port}`;
+  if (protocol === "wireguard") {
+    const wg = object(inbound.config.settings);
+    const peerPrivateKey = text(mapping.wgPrivateKey);
+    const serverSecretKey = text(wg.secretKey);
+    const peerAddress = text(mapping.wgAddresses?.[node.id]);
+    // The panel stores only the server secret; clients authenticate the server with its public key.
+    if (!peerPrivateKey || !serverSecretKey || !peerAddress) return null;
+    let serverPublicKey: string;
+    try { serverPublicKey = wireGuardPublicKey(serverSecretKey); } catch { return null; }
+    const rawMtu = Number(wg.mtu);
+    const mtu = Number.isInteger(rawMtu) && rawMtu >= 576 && rawMtu <= 1500 ? rawMtu : 1420;
+    const params = new URLSearchParams({ publickey: serverPublicKey, address: peerAddress, mtu: String(mtu) });
+    return {
+      clash: {
+        name, type: "wireguard", server, port: inbound.port, ip: peerAddress,
+        "private-key": peerPrivateKey, "public-key": serverPublicKey, "allowed-ips": ["0.0.0.0/0"], udp: true, mtu,
+      },
+      uri: `wireguard://${encodeURIComponent(peerPrivateKey)}@${authority}?${params}#${encodeURIComponent(name)}`,
+    };
+  }
   const stream = object(inbound.config.streamSettings), settings = object(inbound.config.settings);
   const network = text(stream.network) || inbound.network || "tcp";
   const security = text(stream.security) || "none";
@@ -69,7 +92,6 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
   if (network === "tcp" && text(object(object(stream.tcpSettings).header).type) && object(object(stream.tcpSettings).header).type !== "none") return null;
   if (security === "reality" && (protocol !== "vless" || network !== "tcp")) return null;
   if (protocol === "trojan" && security !== "tls") return null;
-  const name = displayName?.trim() || `${inbound.name} · ${node.name} (${inbound.id}/${node.id})`;
   const clash: Record<string, unknown> = { name, type: protocol === "shadowsocks" ? "ss" : protocol, server, port: inbound.port, udp: true };
   const params = new URLSearchParams({ type: network, security });
   let secret = mapping.clientId;
@@ -137,7 +159,6 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
     clash.network = "grpc"; clash["grpc-opts"] = { "grpc-service-name": path };
     params.set("serviceName", path);
   }
-  const authority = `${server.includes(":") ? `[${server}]` : server}:${inbound.port}`;
   if (protocol === "shadowsocks") {
     if (network !== "tcp" || security !== "none") return null;
     const method = text(settings.method);

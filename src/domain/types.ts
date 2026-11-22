@@ -156,6 +156,11 @@ export interface ClientMapping {
   syncStatus: SyncStatus;
   syncError: string | null;
   syncedNodes: string[];
+  /** WireGuard peer credentials minted on first sync; unused by the other protocols. */
+  wgPrivateKey?: string;
+  wgPublicKey?: string;
+  /** Address the peer holds inside the panel subnet, e.g. `10.0.0.2`, keyed by node ID. */
+  wgAddresses?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }

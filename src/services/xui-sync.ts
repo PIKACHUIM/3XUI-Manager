@@ -4,6 +4,7 @@ import { servesPlan } from "../domain/defaults";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, User } from "../domain/types";
 import type { DocumentStore, Page } from "../storage/store";
 import { ThreeXuiClient } from "../adapters/xui/client";
+import { syncWireGuardPeer } from "./wireguard";
 
 async function listAll<T>(store: DocumentStore, collection: string, prefix?: string): Promise<T[]> {
   const rows: T[] = [];
@@ -85,7 +86,10 @@ export async function syncUserEntitlements(store: DocumentStore, env: RuntimeEnv
       }
       try {
         const client = await ThreeXuiClient.connect(env, node);
-        if (!eligible) await client.disableClient(mapping);
+        if (inbound.protocol.toLowerCase() === "wireguard") {
+          // WireGuard has no per-client records: the account owns one peer with its own key pair.
+          if (binding) await syncWireGuardPeer(store, client, mapping, inbound, nodeId, binding.panelInboundId, eligible);
+        } else if (!eligible) await client.disableClient(mapping);
         else if (binding) await client.upsertClient(mapping, inbound, binding, user);
         nodeResults.push(nodeId);
         inboundSuccess += 1;
@@ -129,7 +133,9 @@ export async function syncClientToNodes(store: DocumentStore, env: RuntimeEnv, m
     }
     try {
       const client = await ThreeXuiClient.connect(env, node);
-      if (!mapping.enable || !user.enabled || !hasTraffic) await client.disableClient(mapping);
+      if (inbound.protocol.toLowerCase() === "wireguard") {
+        await syncWireGuardPeer(store, client, mapping, inbound, binding.nodeId, binding.panelInboundId, mapping.enable && user.enabled && hasTraffic);
+      } else if (!mapping.enable || !user.enabled || !hasTraffic) await client.disableClient(mapping);
       else await client.upsertClient(mapping, inbound, binding, user);
       syncedNodes.push(node.id);
       success += 1;

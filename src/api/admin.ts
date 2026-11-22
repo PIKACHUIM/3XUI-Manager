@@ -379,8 +379,11 @@ admin.delete("/nodes/:id", requireAdmin, async (c) => {
   const node = await store.get<NodeRecord>("nodes", nodeId);
   if (!node) return c.json({ error: "Node not found." }, 404);
   const mappings = await listAll<ClientMapping>(store, "clients");
+  const inboundsById = new Map((await listAll<Inbound>(store, "inbounds")).map((item) => [item.id, item]));
   const failures: string[] = [];
   for (const mapping of mappings.filter((item) => item.syncedNodes.includes(nodeId))) {
+    // A WireGuard peer only lives in the inbound settings, so removing the node removes it too.
+    if (inboundsById.get(mapping.inboundId)?.protocol.toLowerCase() === "wireguard") continue;
     try {
       const client = await ThreeXuiClient.connect(c.env, node);
       await client.deleteClient(mapping);
@@ -605,7 +608,9 @@ admin.delete("/inbounds/:id", requireAdmin, async (c) => {
     if (!node) continue;
     try {
       const panel = await ThreeXuiClient.connect(c.env, node);
-      for (const mapping of mappings) if (mapping.syncedNodes.includes(node.id)) await panel.deleteClient(mapping);
+      if (inbound.protocol.toLowerCase() !== "wireguard") {
+        for (const mapping of mappings) if (mapping.syncedNodes.includes(node.id)) await panel.deleteClient(mapping);
+      }
       await panel.deleteInbound(binding.panelInboundId);
     } catch (error) { failures.push({ nodeId: node.id, message: error instanceof Error ? error.message : "Remote delete failed." }); }
   }

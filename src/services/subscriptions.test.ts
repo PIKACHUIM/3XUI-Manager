@@ -126,6 +126,47 @@ describe("subscription formats", () => {
     expect(body).toContain('"日本 · Osaka"');
     expect(body).not.toContain("Subscription");
   });
+  it("exports WireGuard peers with the server key derived from the panel secret", async () => {
+    const wgInbound = {
+      ...inbound, protocol: "wireguard", port: 51820, network: "udp",
+      config: { settings: { secretKey: "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=", subnetIp: "10.0.0.0", subnetCidr: 24, mtu: 1420 } },
+    } as Inbound;
+    const wgMapping = {
+      ...mapping, wgPrivateKey: "dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=",
+      wgPublicKey: "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=", wgAddresses: { n: "10.0.0.2" },
+    } as ClientMapping;
+    const entry = await convertSubscriptionEntry(wgInbound, node, wgMapping, key);
+    expect(entry?.clash).toMatchObject({
+      type: "wireguard", server: "edge.example.com", port: 51820, ip: "10.0.0.2",
+      "private-key": wgMapping.wgPrivateKey, "public-key": "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=",
+      "allowed-ips": ["0.0.0.0/0"], mtu: 1420,
+    });
+    expect(entry?.uri).toContain("wireguard://");
+    expect(entry?.uri).toContain("address=10.0.0.2");
+    // Without peer credentials, a server key or an address the tunnel cannot be built.
+    expect(await convertSubscriptionEntry(wgInbound, node, mapping, key)).toBeNull();
+    expect(await convertSubscriptionEntry({ ...wgInbound, config: { settings: { mtu: 1420 } } }, node, wgMapping, key)).toBeNull();
+    expect(await convertSubscriptionEntry(wgInbound, node, { ...wgMapping, wgAddresses: {} }, key)).toBeNull();
+  });
+  it("renders WireGuard peers in the clash profile", async () => {
+    const { store } = await setup();
+    const wgInbound = {
+      ...inbound, protocol: "wireguard", port: 51820, network: "udp",
+      config: { settings: { secretKey: "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=", subnetIp: "10.0.0.0", subnetCidr: 24, mtu: 1420 } },
+    } as Inbound;
+    await store.put("inbounds", "i", wgInbound);
+    await store.put("clients", "u:i", {
+      ...mapping, wgPrivateKey: "dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo=",
+      wgPublicKey: "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=", wgAddresses: { n: "10.0.0.2" },
+    });
+    const rendered = await renderSubscription(store, user, key, "clash");
+    expect(rendered.count).toBe(1);
+    for (const line of ['type: "wireguard"', 'ip: "10.0.0.2"', 'private-key: "dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo="', 'public-key: "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw="', 'allowed-ips: ["0.0.0.0/0"]', "mtu: 1420"]) {
+      expect(rendered.body).toContain(line);
+    }
+    // SIP008 has no WireGuard representation, so the entry is reported as skipped instead.
+    expect((await renderSubscription(store, user, key, "shadowsocks")).count).toBe(0);
+  });
   it("keeps proxy names unique so a duplicate inbound and node pair still loads", async () => {
     const { store } = await setup();
     await store.put("inbounds", "i2", { ...inbound, id: "i2" });
