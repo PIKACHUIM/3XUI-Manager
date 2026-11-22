@@ -260,7 +260,7 @@ function renderClashConfig(entries: Array<{ proxy: Record<string, unknown>; regi
   });
   const regionGroups = [...regions.entries()].filter(([, members]) => members.length > 1);
   const groups: Array<Record<string, unknown>> = [
-    { name: CLASH_SELECT, type: "select", proxies: names.length ? [CLASH_AUTO, CLASH_FALLBACK, ...regionGroups.map(([region]) => clashRegionGroup(region)), ...names] : ["DIRECT"] },
+    { name: CLASH_SELECT, type: "select", proxies: names.length ? [CLASH_AUTO, CLASH_FALLBACK, ...regionGroups.map(([region]) => clashRegionGroup(region)), ...names, "DIRECT"] : ["DIRECT"] },
   ];
   if (names.length) {
     groups.push({ name: CLASH_AUTO, type: "url-test", url: CLASH_HEALTH_URL, interval: 300, tolerance: 50, proxies: [...names] });
