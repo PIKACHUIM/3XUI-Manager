@@ -162,9 +162,11 @@ export async function renderSubscription(store: DocumentStore, user: User, key: 
   ]);
   const entries: ProxyEntry[] = []; let skipped = 0;
   for (const inbound of inbounds.sort((a, b) => (a.subSortIndex ?? 0) - (b.subSortIndex ?? 0))) {
-    if (!servesPlan(inbound, user.planLevel) || inbound.excludeFromSub || (inbound.expiryTime && inbound.expiryTime <= Date.now())) continue;
+    if (!servesPlan(inbound, user) || inbound.excludeFromSub || (inbound.expiryTime && inbound.expiryTime <= Date.now())) continue;
     const mapping = mappings.find(m => m.inboundId === inbound.id && m.userId === user.id);
-    if (!mapping?.enable || mapping.syncStatus !== "synced") continue;
+    // A partially synced inbound still serves the nodes that did accept the client; only a mapping
+    // with no confirmed node or a disabled client is withheld.
+    if (!mapping?.enable || mapping.syncedNodes.length === 0 || (mapping.syncStatus !== "synced" && mapping.syncStatus !== "partial")) continue;
     for (const binding of bindings.filter(b => b.inboundId === inbound.id && b.panelInboundId > 0)) {
       const node = nodes.find(n => n.id === binding.nodeId);
       if (!node?.enabled || !mapping.syncedNodes.includes(node.id)) continue;

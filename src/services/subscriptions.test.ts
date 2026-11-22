@@ -95,12 +95,25 @@ describe("subscription formats", () => {
       expect((await renderSubscription(store, user, key, "clash")).count).toBe(0);
     }
     await store.put("inbounds", "i", inbound);
-    for (const patch of [{ syncStatus: "failed" }, { syncStatus: "partial" }, { enable: false }, { syncedNodes: [] }, { userId: "other" }]) {
+    for (const patch of [{ syncStatus: "failed" }, { enable: false }, { syncedNodes: [] }, { userId: "other" }]) {
       await store.put("clients", "u:i", { ...mapping, ...patch });
       expect((await renderSubscription(store, user, key, "v2ray")).count).toBe(0);
     }
+    // A partial sync still serves the nodes that accepted the client.
+    await store.put("clients", "u:i", { ...mapping, syncStatus: "partial" });
+    expect((await renderSubscription(store, user, key, "v2ray")).count).toBe(1);
     await store.put("clients", "u:i", mapping); await store.put("nodes", "n", { ...node, enabled: false });
     expect((await renderSubscription(store, user, key, "clash")).count).toBe(0);
+  });
+  it("serves inbounds bound to the user's current plan and hides the rest", async () => {
+    const { store } = await setup();
+    await store.put("inbounds", "i", { ...inbound, planIds: ["p"] });
+    expect((await renderSubscription(store, user, key, "clash")).count).toBe(1);
+    await store.put("inbounds", "i", { ...inbound, planIds: ["other"] });
+    expect((await renderSubscription(store, user, key, "clash")).count).toBe(0);
+    // Empty or legacy bindings keep the level gate, so a high level alone still qualifies.
+    await store.put("inbounds", "i", { ...inbound, planIds: [], minimumLevel: 0 });
+    expect((await renderSubscription(store, user, key, "clash")).count).toBe(1);
   });
 });
 

@@ -10,6 +10,7 @@ import { D1Store } from "../storage/d1";
 import type { RuntimeEnv } from "../env";
 import { runLifecycleMaintenance } from "../services/lifecycle";
 import { runTrafficCollection } from "../services/traffic";
+import { runEntitlementReconciliation } from "../services/xui-reconcile";
 
 api.route("/api/auth", auth);
 api.route("/api/admin", admin);
@@ -42,8 +43,17 @@ app.onError((error, c) => {
 export default {
   fetch: app.fetch,
   scheduled(_controller: ScheduledController, env: RuntimeEnv, context: ExecutionContext) {
-    context.waitUntil(Promise.all([runTrafficCollection(env), runLifecycleMaintenance(env)]).catch((error: unknown) => {
-      console.error(JSON.stringify({ event: "scheduled_jobs_failed", message: error instanceof Error ? error.message : "unknown" }));
-    }));
+    const jobs: Array<[string, () => Promise<unknown>]> = [
+      ["traffic", () => runTrafficCollection(env)],
+      ["lifecycle", () => runLifecycleMaintenance(env)],
+      ["reconcile", () => runEntitlementReconciliation(env)],
+    ];
+    context.waitUntil(Promise.allSettled(jobs.map(async ([name, run]) => {
+      try {
+        await run();
+      } catch (error) {
+        console.error(JSON.stringify({ event: "scheduled_job_failed", job: name, message: error instanceof Error ? error.message : "unknown" }));
+      }
+    })));
   },
 };
