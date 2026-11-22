@@ -81,6 +81,9 @@ export async function runEntitlementReconciliation(env: RuntimeEnv): Promise<Rec
         if (!mapping) { needsSync = true; priority = Math.max(priority, 2); break; }
         if (mapping.syncStatus !== "synced") { needsSync = true; priority = Math.max(priority, 3); break; }
         if (mapping.syncedNodes.length < expected) { needsSync = true; priority = Math.max(priority, 2); break; }
+        // A WireGuard mapping only becomes usable once its peer credentials exist; inbound enabled
+        // after the last sync (or migrated from an older build) still needs one more pass.
+        if (inbound.protocol.toLowerCase() === "wireguard" && !mapping.wgPublicKey) { needsSync = true; priority = Math.max(priority, 3); break; }
         if (now - Date.parse(mapping.updatedAt || mapping.createdAt) > FULL_SWEEP_MS) { needsSync = true; priority = Math.max(priority, 1); break; }
       }
       if (!needsSync && owned.some((mapping) => mapping.enable && !eligible.some((inbound) => inbound.id === mapping.inboundId))) {

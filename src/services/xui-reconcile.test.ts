@@ -113,6 +113,31 @@ describe("runEntitlementReconciliation", () => {
     expect(harness.sync).not.toHaveBeenCalled();
   });
 
+  it("re-syncs a WireGuard mapping that has no peer credentials yet", async () => {
+    const owner = user("user-1");
+    const wireguard = { ...inbound, protocol: "wireguard" } as Inbound;
+    harness.store = new MemoryStore([
+      ["users", owner.id, owner], ["inbounds", wireguard.id, wireguard],
+      ["inbound-node-bindings", "inbound-1:node-1", binding("node-1")],
+      ["clients", `${owner.id}:${inbound.id}`, mapping(owner.id, { updatedAt: new Date().toISOString() })],
+    ]);
+
+    expect(await runEntitlementReconciliation(env)).toMatchObject({ scanned: 1, due: 1, synced: 1 });
+    expect(harness.sync).toHaveBeenCalledTimes(1);
+
+    // Once the peer exists, a freshly synced mapping is left alone again.
+    harness.sync = vi.fn(async (): Promise<SyncResult> => ({ status: "synced", success: 1, failed: 0, errors: [] }));
+    const store = new MemoryStore([
+      ["users", owner.id, owner], ["inbounds", wireguard.id, wireguard],
+      ["inbound-node-bindings", "inbound-1:node-1", binding("node-1")],
+      ["clients", `${owner.id}:${inbound.id}`, mapping(owner.id, { updatedAt: new Date().toISOString(), wgPublicKey: "peer-key" })],
+    ]);
+    harness.store = store;
+
+    expect(await runEntitlementReconciliation(env)).toMatchObject({ due: 0 });
+    expect(harness.sync).not.toHaveBeenCalled();
+  });
+
   it("repairs a missing mapping, a partial mapping and an expired plan", async () => {
     const fresh = user("user-fresh");
     const missing = user("user-missing");
