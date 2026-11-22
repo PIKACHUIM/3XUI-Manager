@@ -859,6 +859,9 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
 
 type TextFn = (key: MessageKey) => string;
 
+/** Tabs of the inbound dialog, mirroring the 3X-UI inbound form plus our plan binding. */
+type InboundTabKey = "basic" | "protocol" | "stream" | "security" | "sniffing" | "plans" | "advanced";
+
 /** Defaults for the complete 3X-UI inbound field set rendered by the admin form. */
 const inboundDefaults: Record<string, string | boolean> = {  protocol: "vless", network: "tcp", port: "443", listen: "", minimumLevel: "0", multiplier: "1", security: "none",
   totalGb: "", expiryTime: "", trafficReset: "never", trafficResetDay: "0", tag: "", shareAddrStrategy: "node", shareAddr: "", subSortIndex: "1", excludeFromSub: false, disableFlow: false,
@@ -996,9 +999,14 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   });
   const [nodeIds, setNodeIds] = useState<string[]>(() => initial && kind === "inbound" ? bindings.filter((binding) => binding.inboundId === initial.id).map((binding) => binding.nodeId) : kind === "inbound" && nodes.length ? [nodes[0].id] : []);
   const [clients, setClients] = useState<InboundClientDraft[]>(() => (kind === "inbound" ? inboundClientDrafts(initial as AdminInboundRecord | undefined) : []));
+  const [inboundTab, setInboundTab] = useState<InboundTabKey>("basic");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const text = (zh: string, en: string) => say(locale, zh, en);
+  const inboundTabItems: Array<[InboundTabKey, string]> = [
+    ["basic", text("基本", "Basic")], ["protocol", text("协议", "Protocol")], ["stream", text("传输", "Transport")],
+    ["security", text("安全", "Security")], ["sniffing", text("嗅探", "Sniffing")], ["plans", text("套餐", "Plans")], ["advanced", text("高级", "Advanced")],
+  ];
   const planEditingDefault = kind === "plan" && initial ? (initial as ApiPlan).isDefault : false;
   const title = initial ? kind === "node" ? text("编辑节点", "Edit node") : kind === "inbound" ? text("编辑入站", "Edit inbound") : kind === "plan" ? text("编辑套餐", "Edit plan") : text("编辑用户", "Edit user") : kind === "node" ? text("添加 3X-UI 节点", "Add 3X-UI node") : kind === "inbound" ? text("添加入站", "Add inbound") : kind === "plan" ? text("添加套餐", "Add plan") : text("添加用户", "Add user");
   const field = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => <label><span>{label}</span><input {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
@@ -1045,10 +1053,13 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         body = { name: String(fields.name).trim(), region: fields.region, panelUrl: String(fields.panelUrl).trim(), publicAddress: fields.publicAddress, username: fields.username, basePath: fields.basePath, enabled: fields.enabled === true, ...(fields.password ? { password: fields.password } : {}), ...(fields.apiToken ? { apiToken: fields.apiToken } : {}) };
       } else if (kind === "inbound") {
         const jsonSection = (name: string) => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? text("协议设置", "Protocol") : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade"].includes(name) ? text("传输方式", "Transport") : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? text("传输安全", "Security") : text("高级设置", "Advanced");
-        if (!initial && !nodeIds.length) throw new Error(text("至少选择一个已启用节点。", "Select at least one enabled node."));
+        // Jump to the tab that owns a failing field, the way the 3X-UI form does.
+        const jsonTab = (name: string): InboundTabKey => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? "protocol" : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade"].includes(name) ? "stream" : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? "security" : "advanced";
+        if (!initial && !nodeIds.length) { setInboundTab("basic"); throw new Error(text("至少选择一个已启用节点。", "Select at least one enabled node.")); }
         const port = Number(fields.port);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(text("端口必须在 1-65535 之间。", "Port must be between 1 and 65535."));
+        if (!Number.isInteger(port) || port < 1 || port > 65535) { setInboundTab("basic"); throw new Error(text("端口必须在 1-65535 之间。", "Port must be between 1 and 65535.")); }
         if (fields.security === "reality" && (!String(fields.realityDest).trim() || !String(fields.realityPrivateKey).trim())) {
+          setInboundTab("security");
           throw new Error(text("REALITY 需要填写目标地址与私钥。", "REALITY needs a destination and a private key."));
         }
         for (const [name, kind] of inboundJsonFields) {
@@ -1058,14 +1069,15 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
             const parsed: unknown = JSON.parse(source);
             if (kind === "array" ? !Array.isArray(parsed) : (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) throw new Error("shape");
           } catch {
+            setInboundTab(jsonTab(name));
             throw new Error(`${jsonSection(name)} · ${text("以下字段必须是合法 JSON：", "This field must contain valid JSON: ")}${name}`);
           }
         }
         if ((inboundClientProtocols as readonly string[]).includes(String(fields.protocol))) {
           const emails = clients.map((client) => client.email.trim());
-          if (emails.some((email) => !email)) throw new Error(text("每个客户端都需要填写邮箱。", "Every client needs an email address."));
+          if (emails.some((email) => !email)) { setInboundTab("protocol"); throw new Error(text("每个客户端都需要填写邮箱。", "Every client needs an email address.")); }
           const duplicate = emails.find((email, index) => emails.indexOf(email) !== index);
-          if (duplicate) throw new Error(`${text("客户端邮箱不能重复：", "Duplicate client email: ")}${duplicate}`);
+          if (duplicate) { setInboundTab("protocol"); throw new Error(`${text("客户端邮箱不能重复：", "Duplicate client email: ")}${duplicate}`); }
         }
         const clientPayload = clients.map((draft) => clientDraftPayload(draft, String(fields.protocol)));
         body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig({ ...fields, clients: JSON.stringify(clientPayload) }), ...(!initial ? { nodeIds } : {}) };
@@ -1131,6 +1143,10 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     </>}
         {kind === "inbound" && <div className="inbound-editor">
           <div className="inbound-editor-main">
+            <div className="inbound-tabs" role="tablist" aria-label={text("入站设置分区", "Inbound settings sections")}>
+              {inboundTabItems.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={inboundTab === key} className={inboundTab === key ? "active" : ""} onClick={() => setInboundTab(key)}>{label}</button>)}
+            </div>
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "basic"}>
             {formSection(text("基础", "Basics"), <>
               {field("name", text("备注", "Remark"), { required: true, maxLength: 100 })}
               {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]))}
@@ -1141,7 +1157,11 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
               {selectField("trafficReset", text("流量重置周期", "Traffic reset"), trafficResetUnits.map((value): [string, string] => [value, trafficResetLabel(value, text)]))}
               {(fields.trafficReset === "monthly" || fields.trafficReset === "weekly") && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 0, max: 31, step: 1 })}
             </>)}
+            <div className="admin-form-inline">{checkField("enabled", text("启用入站", "Inbound enabled"))}</div>
+            {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
+            </div>
 
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "protocol"}>
             {formSection(text("协议设置", "Protocol settings"), <>
               {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 的客户端在右侧列表中维护，协议本身没有额外参数。", "VMess clients live in the client list on the right; the protocol itself has no extra options.")}</div>}
               {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("VLESS 解密方式", "VLESS decryption"), { placeholder: "none" })}</>}
@@ -1151,7 +1171,9 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
               {fields.protocol === "wireguard" && <>{field("wireguardSecretKey", text("WireGuard 私钥", "WireGuard secret key"))}{field("wireguardAddress", text("WireGuard 地址（CIDR，逗号分隔）", "WireGuard address (CIDR, comma separated)"))}{field("wireguardMtu", "MTU", { type: "number", min: 0, max: 65535, step: 1 })}{checkField("wireguardNoKernelTun", text("禁用内核 TUN", "Disable kernel TUN"))}{areaField("wireguardPeers", text("对端（JSON 数组）", "Peers (JSON array)"), { placeholder: '[{"publicKey":"…","allowedIPs":["0.0.0.0/0"]}]' })}{areaField("wireguardNoise", text("Noise 配置（JSON）", "Noise settings (JSON)"))}</>}
               {(fields.protocol === "vless" || fields.protocol === "trojan") && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}
             </>)}
+            </div>
 
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "stream"}>
             {formSection(text("传输方式", "Transport"), <>
               {selectField("network", text("传输方式", "Transport"), inboundNetworks.map((value): [string, string] => [value, inboundNetworkLabels[value] ?? value]))}
               {(fields.network === "tcp" || fields.network === "raw") && <>{selectField("tcpHeader", text("TCP 伪装类型", "TCP header type"), [["none", text("无", "None")], ["http", "HTTP"]])}{checkField("tcpAcceptProxyProtocol", text("接受 PROXY protocol", "Accept PROXY protocol"))}{fields.tcpHeader === "http" && <>{areaField("tcpRequest", text("HTTP 请求头（JSON）", "HTTP request (JSON)"))}{areaField("tcpResponse", text("HTTP 响应头（JSON）", "HTTP response (JSON)"))}</>}</>}
@@ -1163,7 +1185,9 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
               {fields.network === "kcp" && <>{field("kcpMtu", "mtu", { type: "number", min: 576, max: 1460, step: 1 })}{field("kcpTti", "tti", { type: "number", min: 10, max: 100, step: 1 })}{field("kcpUplinkCapacity", "uplinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpDownlinkCapacity", "downlinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpCwndMultiplier", "cwndMultiplier", { type: "number", min: 0, step: 0.1 })}{field("kcpMaxSendingWindow", "maxSendingWindow", { type: "number", min: 0, step: 1 })}{field("kcpReadBufferSize", "readBufferSize", { type: "number", min: 0, step: 1 })}{field("kcpWriteBufferSize", "writeBufferSize", { type: "number", min: 0, step: 1 })}{selectField("kcpHeaderType", text("伪装类型", "Header type"), kcpHeaderTypes.map((value): [string, string] => [value, value]))}{field("kcpSeed", text("种子（可选）", "Seed (optional)"))}{checkField("kcpCongestion", text("启用拥塞控制", "Enable congestion control"))}</>}
               {fields.network === "hysteria" && <>{field("hysteriaVersion", text("Hysteria 版本", "Hysteria version"), { type: "number", min: 1, max: 2, step: 1 })}{field("hysteriaAuth", text("认证字符串", "Auth string"))}{field("hysteriaUdpIdleTimeout", "udpIdleTimeout", { type: "number", min: 0, step: 1 })}{areaField("hysteriaMasquerade", text("伪装站点（JSON）", "Masquerade (JSON)"))}</>}
             </>)}
+            </div>
 
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "security"}>
             {formSection(text("传输安全", "Transport security"), <>
               {selectField("security", text("传输安全", "Transport security"), [["none", text("无", "None")], ["tls", "TLS"], ["reality", "REALITY"]])}
               {fields.security === "none" && <div className="admin-form-wide admin-form-note">{text("当前不启用传输加密，TLS 与 REALITY 参数会被忽略。", "No transport encryption is enabled; TLS and REALITY settings are ignored.")}</div>}
@@ -1200,7 +1224,9 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
               {field("realityMldsa65Verify", text("ML-DSA-65 校验", "ML-DSA-65 verify"))}
               {checkField("realityShow", text("在日志中显示调试信息", "Show debug output"))}
             </>)}
+            </div>
 
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "sniffing"}>
             {formSection(text("流量嗅探", "Sniffing"), <>
               {checkField("sniffEnabled", text("启用流量嗅探", "Enable sniffing"))}
               {checkField("sniffMetadataOnly", text("仅元数据", "Metadata only"))}
@@ -1209,16 +1235,15 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
               {field("sniffDomainsExcluded", text("排除域名（逗号分隔）", "Excluded domains (comma separated)"))}
               {field("sniffIpsExcluded", text("排除 IP（逗号分隔）", "Excluded IPs (comma separated)"))}
             </>)}
+            </div>
 
-            <details className="inbound-advanced">
-              <summary>{text("高级与系统设置", "Advanced and system settings")}</summary>
-              {formSection(text("权限与同步", "Access and sync"), <>
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "plans"}>
+              {formSection(text("套餐与分配", "Plans and access"), <>
                 {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
                 {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
                 {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
-                {checkField("enabled", text("启用入站", "Inbound enabled"))}
-                {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
               </>)}
+              <div className="admin-form-note">{text("套餐等级的账户只会在「对套餐启用」且等级不低于最低套餐等级时获得该入站的客户端；保存后会立即为现有用户下发并重同步。", "Accounts whose plan level meets the minimum receive a client for this inbound only when it is provisioned for plans; saving provisions and resyncs existing users right away.")}</div>
               {formSection(text("订阅与分享", "Subscription and sharing"), <>
                 {field("tag", text("标签", "Tag"), { maxLength: 64 })}
                 {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
@@ -1227,6 +1252,9 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
                 {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
                 {checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
               </>)}
+            </div>
+
+            <div className="admin-form-tabpanel" hidden={inboundTab !== "advanced"}>
               {formSection(text("Socket 参数", "Socket options"), <>
                 {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
                 {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
@@ -1248,16 +1276,13 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
                 {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
                 {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
               </>)}
-              <details className="inbound-advanced inbound-advanced-nested">
-                <summary>{text("原始 JSON", "Raw JSON")}</summary>
-                {formSection(text("原始配置", "Raw config"), <>
-                  {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
-                  {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
-                  {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
-                  {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
-                </>)}
-              </details>
-            </details>
+              {formSection(text("原始配置", "Raw config"), <>
+                {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
+                {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
+                {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
+                {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
+              </>)}
+            </div>
           </div>
 
           <aside className="inbound-clients" aria-label={text("客户端", "Clients")}>
