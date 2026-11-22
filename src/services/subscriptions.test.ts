@@ -119,12 +119,19 @@ describe("subscription formats", () => {
     expect(body.startsWith("# 3XUI Manager")).toBe(true);
     for (const line of [
       "mixed-port: 7890", 'mode: "rule"', "external-controller:", "dns:", 'enhanced-mode: "fake-ip"',
-      "proxies:", "proxy-groups:", "rules:", '"🚀 节点选择"', '"♻️ 自动选择"', '"🚑 故障转移"', '"📍 日本"',
+      "proxies:", "proxy-groups:", "rules:", '"♻️ 自动选择"',
       '"🎬 爱奇艺&哔哩哔哩"', '"🛑 拦截广告"', "MATCH,🐟 漏网之鱼", "GEOIP,CN,🇨🇳 国内网站",
     ]) expect(body).toContain(line);
     expect(body).toContain('"日本 · Tokyo"');
     expect(body).toContain('"日本 · Osaka"');
     expect(body).not.toContain("Subscription");
+    // No selector, fallback or region group is generated; nodes are picked inside each category.
+    for (const gone of ["🚀 节点选择", "🚑 故障转移", "📍 日本", 'type: "fallback"']) expect(body).not.toContain(gone);
+    expect(body).toContain('type: "url-test"');
+    // A proxy category defaults to 自动选择 and lists every node for a manual switch.
+    expect(body).toContain('proxies: ["♻️ 自动选择", "日本 · Tokyo", "日本 · Osaka", "DIRECT"]');
+    expect(body).toContain('proxies: ["DIRECT", "日本 · Tokyo", "日本 · Osaka", "♻️ 自动选择"]');
+    expect(body).toContain('proxies: ["REJECT", "DIRECT", "日本 · Tokyo", "日本 · Osaka", "♻️ 自动选择"]');
   });
   it("exports WireGuard peers with the server key derived from the panel secret", async () => {
     const wgInbound = {

@@ -208,23 +208,21 @@ function yamlLines(value: unknown, indent: number): string[] {
   return [`${pad}${yamlScalar(value)}`];
 }
 
-const CLASH_SELECT = "🚀 节点选择";
 const CLASH_AUTO = "♻️ 自动选择";
-const CLASH_FALLBACK = "🚑 故障转移";
 const CLASH_HEALTH_URL = "http://cp.cloudflare.com/generate_204";
-const clashRegionGroup = (region: string) => `📍 ${region}`;
-/** Category groups and their initially selected target, mirroring common Clash rule sets. */
-const clashCategories: Array<[string, string]> = [
-  ["🎬 爱奇艺&哔哩哔哩", "DIRECT"],
-  ["📺 动画疯", CLASH_SELECT],
-  ["🎮 Steam 登录/下载", "DIRECT"],
-  ["🛒 Steam 商店/社区", CLASH_SELECT],
-  ["☁️ Cloudflare", CLASH_SELECT],
-  ["📁 OneDrive", CLASH_SELECT],
-  ["🎓 学术网站", CLASH_SELECT],
-  ["🇨🇳 国内网站", "DIRECT"],
-  ["🛑 拦截广告", "REJECT"],
-  ["🐟 漏网之鱼", CLASH_SELECT],
+type ClashCategoryTarget = "proxy" | "direct" | "reject";
+/** Rule categories; every group lists the nodes itself so the node choice stays manual. */
+const clashCategories: Array<[string, ClashCategoryTarget]> = [
+  ["🎬 爱奇艺&哔哩哔哩", "direct"],
+  ["📺 动画疯", "proxy"],
+  ["🎮 Steam 登录/下载", "direct"],
+  ["🛒 Steam 商店/社区", "proxy"],
+  ["☁️ Cloudflare", "proxy"],
+  ["📁 OneDrive", "proxy"],
+  ["🎓 学术网站", "proxy"],
+  ["🇨🇳 国内网站", "direct"],
+  ["🛑 拦截广告", "reject"],
+  ["🐟 漏网之鱼", "proxy"],
 ];
 const clashCategory = (suffix: string) => clashCategories.find(([name]) => name.includes(suffix))?.[0] ?? "";
 const clashRules: string[] = [
@@ -267,31 +265,23 @@ const clashDns = {
   fallback: ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"],
   "fallback-filter": { geoip: true, "geoip-code": "CN", ipcidr: ["240.0.0.0/4"] },
 };
+/** Category options start from the default target, then every node, so the user can switch by hand. */
+function categoryProxies(target: ClashCategoryTarget, names: readonly string[]): string[] {
+  const nodes = [...names, ...(names.length ? [CLASH_AUTO] : [])];
+  if (target === "reject") return ["REJECT", "DIRECT", ...nodes];
+  if (target === "direct") return ["DIRECT", ...nodes];
+  return [...(names.length ? [CLASH_AUTO] : []), ...names, "DIRECT"];
+}
 /**
- * A full Clash / Mihomo profile: general options, fake-ip DNS, the proxies, a select/url-test/fallback
- * stack with region groups, and the usual rule categories so the profile works without a converter.
+ * A full Clash / Mihomo profile: general options, fake-ip DNS, the proxies and the rule categories.
+ * Only the url-test group is generated besides the categories; node choice inside each category is
+ * manual, so no selector, fallback or region group is created.
  */
-function renderClashConfig(entries: Array<{ proxy: Record<string, unknown>; region: string }>): string {
-  const proxies = entries.map((entry) => entry.proxy);
+function renderClashConfig(proxies: Array<Record<string, unknown>>): string {
   const names = proxies.map((proxy) => String(proxy.name));
-  const regions = new Map<string, string[]>();
-  entries.forEach((entry, index) => {
-    if (!entry.region || names.includes(entry.region)) return;
-    regions.set(entry.region, [...(regions.get(entry.region) ?? []), names[index] ?? ""]);
-  });
-  const regionGroups = [...regions.entries()].filter(([, members]) => members.length > 1);
-  const groups: Array<Record<string, unknown>> = [
-    { name: CLASH_SELECT, type: "select", proxies: names.length ? [CLASH_AUTO, CLASH_FALLBACK, ...regionGroups.map(([region]) => clashRegionGroup(region)), ...names, "DIRECT"] : ["DIRECT"] },
-  ];
-  if (names.length) {
-    groups.push({ name: CLASH_AUTO, type: "url-test", url: CLASH_HEALTH_URL, interval: 300, tolerance: 50, proxies: [...names] });
-    groups.push({ name: CLASH_FALLBACK, type: "fallback", url: CLASH_HEALTH_URL, interval: 300, proxies: [...names] });
-  }
-  for (const [region, members] of regionGroups) groups.push({ name: clashRegionGroup(region), type: "select", proxies: [...members, "DIRECT"] });
-  for (const [name, selected] of clashCategories) {
-    const options = selected === "REJECT" ? ["REJECT", "DIRECT", CLASH_SELECT] : selected === CLASH_SELECT ? [CLASH_SELECT, "DIRECT"] : ["DIRECT", CLASH_SELECT];
-    groups.push({ name, type: "select", proxies: options });
-  }
+  const groups: Array<Record<string, unknown>> = [];
+  if (names.length) groups.push({ name: CLASH_AUTO, type: "url-test", url: CLASH_HEALTH_URL, interval: 300, tolerance: 50, proxies: [...names] });
+  for (const [name, target] of clashCategories) groups.push({ name, type: "select", proxies: categoryProxies(target, names) });
   const config = {
     "mixed-port": 7890,
     "allow-lan": false,
@@ -311,7 +301,7 @@ export async function renderSubscription(store: DocumentStore, user: User, key: 
     listCollection<Inbound>(store, "inbounds"), listCollection<NodeRecord>(store, "nodes"),
     listCollection<InboundNodeBinding>(store, "inbound-node-bindings"), listCollection<ClientMapping>(store, "clients", `${user.id}:`),
   ]);
-  const entries: Array<{ entry: ProxyEntry; region: string }> = []; let skipped = 0;
+  const entries: ProxyEntry[] = []; let skipped = 0;
   const usedNames = new Set<string>(clashCategories.map(([name]) => name));
   for (const inbound of inbounds.sort((a, b) => (a.subSortIndex ?? 0) - (b.subSortIndex ?? 0))) {
     if (!servesPlan(inbound, user) || inbound.excludeFromSub || (inbound.expiryTime && inbound.expiryTime <= Date.now())) continue;
@@ -327,12 +317,12 @@ export async function renderSubscription(store: DocumentStore, user: User, key: 
       for (let suffix = 2; usedNames.has(name); suffix += 1) name = `${base} #${suffix}`;
       usedNames.add(name);
       const entry = await convertSubscriptionEntry(inbound, node, mapping, key, name);
-      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push({ entry, region: text(node.region).trim() }); else skipped++;
+      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push(entry); else skipped++;
     }
   }
   let body: string;
-  if (format === "clash") body = renderClashConfig(entries.map(({ entry, region }) => ({ proxy: entry.clash, region })));
-  else if (format === "v2ray") body = base64(entries.map(({ entry }) => entry.uri).join("\n"));
-  else body = JSON.stringify({ version: 1, servers: entries.map(({ entry }) => entry.ss) }, null, 2);
+  if (format === "clash") body = renderClashConfig(entries.map((entry) => entry.clash));
+  else if (format === "v2ray") body = base64(entries.map((entry) => entry.uri).join("\n"));
+  else body = JSON.stringify({ version: 1, servers: entries.map((entry) => entry.ss) }, null, 2);
   return { body, contentType: format === "clash" ? "application/yaml; charset=utf-8" : format === "v2ray" ? "text/plain; charset=utf-8" : "application/json; charset=utf-8", count: entries.length, skipped };
 }
