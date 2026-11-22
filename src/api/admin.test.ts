@@ -620,6 +620,84 @@ describe("admin API local D1 integration", () => {
     }
   });
 
+  it("binds several plans to one inbound and rejects unknown plans", async () => {
+    const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    const planName = `Bound plan ${crypto.randomUUID()}`;
+    const nodeName = `Plan binding node ${crypto.randomUUID()}`;
+    const inboundName = `Plan binding inbound ${crypto.randomUUID()}`;
+    const panel = {
+      listInbounds: vi.fn(async () => []),
+      supportsClientApi: vi.fn(async () => true),
+      addInbound: vi.fn(async () => 77),
+      updateInbound: vi.fn(async () => undefined),
+    };
+    const connect = vi.spyOn(ThreeXuiClient, "connect").mockResolvedValue(panel as unknown as ThreeXuiClient);
+    let planId = "";
+
+    try {
+      const planResponse = await request("/api/admin/plans", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          name: planName, description: "", level: 4, trafficBytes: 1_000_000_000, validityDays: 30, priceMinor: 500,
+          currency: "USD", resetUnit: "month", resetInterval: 1, resetAtHour: 0, resetWeekday: 1, resetMonthDay: 1, allowPaidUpgrade: false, enabled: true,
+        }),
+      });
+      expect(planResponse.status).toBe(201);
+      planId = ((await planResponse.json()) as { plan: { id: string } }).plan.id;
+
+      const nodeResponse = await request("/api/admin/nodes", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          name: nodeName, region: "local", panelUrl: "https://panel.example.test", publicAddress: "node.example.test",
+          username: "local-user", password: "local-panel-password", basePath: "/", enabled: true,
+        }),
+      });
+      expect(nodeResponse.status).toBe(201);
+      const nodeId = ((await nodeResponse.json()) as { node: { id: string } }).node.id;
+
+      const createBody = {
+        name: inboundName, protocol: "vless", network: "tcp", port: 8443, nodeIds: [nodeId],
+        config: { settings: { clients: [], decryption: "none" }, streamSettings: { network: "tcp", security: "none" } },
+      };
+      const unknownPlan = await request("/api/admin/inbounds", {
+        method: "POST", headers, body: JSON.stringify({ ...createBody, planIds: [planId, "missing-plan"] }),
+      });
+      expect(unknownPlan.status).toBe(422);
+      expect((await store.list<{ id: string; name: string }>("inbounds")).items.map((item) => item.name)).not.toContain(inboundName);
+
+      const created = await request("/api/admin/inbounds", {
+        method: "POST", headers, body: JSON.stringify({ ...createBody, planIds: [planId, planId] }),
+      });
+      expect(created.status).toBe(201);
+      const inboundId = ((await created.json()) as { inbound: { id: string } }).inbound.id;
+      expect(await store.get<Inbound>("inbounds", inboundId)).toMatchObject({ planIds: [planId] });
+
+      const rejected = await request(`/api/admin/inbounds/${inboundId}`, {
+        method: "PATCH", headers, body: JSON.stringify({ planIds: ["missing-plan"] }),
+      });
+      expect(rejected.status).toBe(422);
+      expect(await store.get<Inbound>("inbounds", inboundId)).toMatchObject({ planIds: [planId] });
+
+      const cleared = await request(`/api/admin/inbounds/${inboundId}`, {
+        method: "PATCH", headers, body: JSON.stringify({ planIds: [] }),
+      });
+      expect(cleared.status).toBe(200);
+      expect(await store.get<Inbound>("inbounds", inboundId)).toMatchObject({ planIds: [] });
+    } finally {
+      connect.mockRestore();
+      const inbounds = await store.list<{ id: string; name: string }>("inbounds");
+      for (const inbound of inbounds.items.filter((item) => item.name === inboundName)) {
+        for (const client of (await store.list<{ id: string; inboundId: string }>("clients")).items.filter((item) => item.inboundId === inbound.id)) await store.delete("clients", client.id);
+        for (const binding of (await store.list<{ id: string; inboundId: string }>("inbound-node-bindings")).items.filter((item) => item.inboundId === inbound.id)) await store.delete("inbound-node-bindings", binding.id);
+        await store.delete("inbound-sync", inbound.id);
+        await store.delete("inbounds", inbound.id);
+      }
+      for (const node of (await store.list<{ id: string; name: string }>("nodes")).items.filter((item) => item.name === nodeName)) await store.delete("nodes", node.id);
+      if (planId) await store.delete("plans", planId);
+    }
+  });
+
   it("imports panel inbounds for one node without provisioning plan clients", async () => {
     const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
     const store = new D1Store(platform.env.DB as unknown as Env["DB"]);

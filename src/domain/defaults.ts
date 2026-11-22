@@ -1,13 +1,19 @@
-import type { Inbound, Plan } from "./types";
+import type { Inbound, Plan, User } from "./types";
 import type { DocumentStore } from "../storage/store";
 
 export const FREE_PLAN_ID = "plan-free";
 export const SESSION_COOKIE = "3xui_session";
 export const SESSION_DAYS = 7;
 
-/** An inbound serves plan users only when it is enabled, plan-enabled and its level gate is met. */
-export function servesPlan(inbound: Inbound, planLevel: number): boolean {
-  return inbound.enabled && inbound.planEnabled !== false && inbound.minimumLevel <= planLevel;
+/**
+ * An inbound serves a plan user when it is enabled, plan-enabled and either the user's current
+ * plan is explicitly bound or, for legacy inbounds without bindings, the level gate is met.
+ */
+export function servesPlan(inbound: Inbound, user: Pick<User, "planId" | "planLevel">): boolean {
+  if (!inbound.enabled || inbound.planEnabled === false) return false;
+  const boundPlans = (inbound.planIds ?? []).filter((id) => Boolean(id));
+  if (boundPlans.length) return Boolean(user.planId) && boundPlans.includes(user.planId);
+  return inbound.minimumLevel <= user.planLevel;
 }
 
 export const defaultPlan: Plan = {

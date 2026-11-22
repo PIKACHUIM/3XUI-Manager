@@ -132,13 +132,15 @@ describe("inbound config builder", () => {
     });
     expect(buildInboundMeta({ ...baseFields, trafficReset: "yearly", totalGb: "-3" })).toMatchObject({ trafficReset: "never", total: 0, subSortIndex: 1 });
     const values = inboundFieldValues({
-      name: "Tokyo", protocol: "vless", network: "ws", port: 443, minimumLevel: 0, multiplier: 1, enabled: true, planEnabled: true, config: {}, ...meta,
+      name: "Tokyo", protocol: "vless", network: "ws", port: 443, minimumLevel: 0, multiplier: 1, enabled: true, planEnabled: true, planIds: ["plan-a", "plan-b"], config: {}, ...meta,
     });
     expect(values).toMatchObject({
       totalGb: "1.5", trafficReset: "monthly", trafficResetDay: "7", tag: "tokyo-ws", shareAddrStrategy: "custom",
       shareAddr: "edge.example.test", subSortIndex: "4", excludeFromSub: true, disableFlow: true, clientFlow: "xtls-rprx-vision",
+      planIds: "plan-a,plan-b",
     });
     expect(values.expiryTime).toBe("2027-01-02T03:04");
+    expect(inboundFieldValues({ name: "Legacy", protocol: "vless", network: "tcp", port: 443, minimumLevel: 0, multiplier: 1, enabled: true, config: {} })).toMatchObject({ planIds: "" });
   });
 
   it("builds advanced transport, TLS, sockopt and sniffing details", () => {

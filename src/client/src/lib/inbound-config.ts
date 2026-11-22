@@ -9,6 +9,7 @@ export type InboundConfigRecord = {
   multiplier: number;
   enabled: boolean;
   planEnabled?: boolean;
+  planIds?: string[];
   config: Record<string, unknown>;
   listen?: string;
   total?: number;
@@ -748,6 +749,7 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
     multiplier: String(record.multiplier ?? 1),
     enabled: record.enabled !== false,
     planEnabled: record.planEnabled !== false,
+    planIds: (record.planIds ?? []).join(","),
     baseConfig: JSON.stringify(config),
     security: plainText(stream.security, "none"),
     // Inbound-level 3X-UI fields.

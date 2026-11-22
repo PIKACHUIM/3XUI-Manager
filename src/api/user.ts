@@ -136,7 +136,7 @@ userApi.get("/overview", async (c) => {
     readCheckinRewardRange(store),
     readSetting<unknown>(store, "timezone", "UTC"),
   ]);
-  const availableInbounds = new Set(inbounds.filter((inbound) => servesPlan(inbound, user.planLevel)).map((inbound) => inbound.id));
+  const availableInbounds = new Set(inbounds.filter((inbound) => servesPlan(inbound, user)).map((inbound) => inbound.id));
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const activeBindings = bindings.filter((binding) => availableInbounds.has(binding.inboundId));
   const activeNodes = [...new Map(activeBindings.flatMap((binding) => {
@@ -196,7 +196,7 @@ userApi.get("/nodes", async (c) => {
     listAll<NodeRecord>(store, "nodes"),
     listAll<ClientMapping>(store, "clients", `${user.id}:`),
   ]);
-  const inboundMap = new Map(inbounds.filter((inbound) => servesPlan(inbound, user.planLevel)).map((inbound) => [inbound.id, inbound]));
+  const inboundMap = new Map(inbounds.filter((inbound) => servesPlan(inbound, user)).map((inbound) => [inbound.id, inbound]));
   const clientMap = new Map(mappings.map((mapping) => [mapping.inboundId, mapping]));
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const items = bindings.flatMap((binding) => {
@@ -272,7 +272,7 @@ userApi.get("/subscription", async (c) => {
   const inboundMap = new Map(inbounds.map((inbound) => [inbound.id, inbound]));
   const clients = mappings.flatMap((mapping) => {
     const inbound = inboundMap.get(mapping.inboundId);
-    if (!inbound || !servesPlan(inbound, user.planLevel)) return [];
+    if (!inbound || !servesPlan(inbound, user)) return [];
     return [{ inboundId: inbound.id, inboundName: inbound.name, protocol: inbound.protocol, port: inbound.port, enabled: mapping.enable, syncStatus: mapping.syncStatus }];
   });
   return c.json({

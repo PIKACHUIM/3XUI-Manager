@@ -112,6 +112,8 @@ export interface Inbound {
   enabled: boolean;
   /** When false the inbound stays on the panel but is never provisioned for plan users. */
   planEnabled?: boolean;
+  /** Plans explicitly bound to this inbound. Empty or absent keeps the legacy `minimumLevel` gate. */
+  planIds?: string[];
   /** Panel listen address; an empty string means every interface. */
   listen?: string;
   /** Total traffic allowance in bytes (0 = unlimited). */

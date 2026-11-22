@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { businessSettingKeys, prepareBusinessSettings, publicSettings, validateBusinessSetting } from "../services/settings";
 import type { Context } from "hono";
-import { FREE_PLAN_ID, defaultPlan, ensureDefaultPlan, readCheckinRewardRange, readSetting, writeSetting } from "../domain/defaults";
+import { FREE_PLAN_ID, defaultPlan, ensureDefaultPlan, readCheckinRewardRange, readSetting, servesPlan, writeSetting } from "../domain/defaults";
 import { encryptSecret, hashPassword } from "../domain/security";
 import type { ApiEnv } from "./context";
 import { requireAdmin, validateSameOrigin } from "./context";
@@ -421,10 +421,15 @@ admin.post("/inbounds", requireAdmin, async (c) => {
   if (nodes.some((node) => !node || !node.enabled)) return c.json({ error: "One or more selected nodes are unavailable." }, 422);
   const config = body.config && typeof body.config === "object" && !Array.isArray(body.config) ? body.config as Record<string, unknown> : {};
   const planEnabled = body.planEnabled !== false;
+  const planIds = [...new Set(Array.isArray(body.planIds) ? body.planIds.filter((id): id is string => typeof id === "string") : [])];
+  if (planIds.length) {
+    const selected = await Promise.all(planIds.map((id) => store.get<Plan>("plans", id)));
+    if (selected.some((plan) => !plan)) return c.json({ error: "One or more selected plans are unavailable." }, 422);
+  }
   const inbound: Inbound = {
     id: crypto.randomUUID(), name: body.name.trim().slice(0, 100), protocol: body.protocol.toLowerCase(),
     network: typeof body.network === "string" ? body.network : "tcp", port: body.port, minimumLevel: level,
-    multiplier, enabled: body.enabled !== false, planEnabled, config, ...inboundMeta(body), createdAt: now(), updatedAt: now(),
+    multiplier, enabled: body.enabled !== false, planEnabled, planIds, config, ...inboundMeta(body), createdAt: now(), updatedAt: now(),
   };
   const failures: Array<{ nodeId: string; message: string }> = [];
   const createdBindings: InboundNodeBinding[] = [];
@@ -447,7 +452,7 @@ admin.post("/inbounds", requireAdmin, async (c) => {
   await store.put("inbound-sync", inbound.id, { inboundId: inbound.id, status: failures.length === 0 ? "synced" : createdBindings.length ? "partial" : "failed", failures, updatedAt: now() });
   if (inbound.planEnabled) {
     const users = await listAll<User>(store, "users");
-    for (const user of users.filter((item) => item.enabled && item.planLevel >= inbound.minimumLevel && createdBindings.length)) {
+    for (const user of users.filter((item) => item.enabled && servesPlan(inbound, item) && createdBindings.length)) {
       await syncUserEntitlements(store, c.env, user.id);
     }
   }
@@ -557,6 +562,16 @@ admin.patch("/inbounds/:id", requireAdmin, async (c) => {
   if (typeof body.multiplier === "number" && body.multiplier >= 0 && body.multiplier <= 100) next.multiplier = body.multiplier;
   if (typeof body.enabled === "boolean") next.enabled = body.enabled;
   if (typeof body.planEnabled === "boolean") next.planEnabled = body.planEnabled;
+  let planBindingChanged = false;
+  if (Array.isArray(body.planIds)) {
+    const planIds = [...new Set(body.planIds.filter((id): id is string => typeof id === "string"))];
+    if (planIds.length) {
+      const selected = await Promise.all(planIds.map((id) => store.get<Plan>("plans", id)));
+      if (selected.some((plan) => !plan)) return c.json({ error: "One or more selected plans are unavailable." }, 422);
+    }
+    planBindingChanged = [...(inbound.planIds ?? [])].sort().join(",") !== [...planIds].sort().join(",");
+    next.planIds = planIds;
+  }
   Object.assign(next, inboundMeta(body));
   if (body.config && typeof body.config === "object" && !Array.isArray(body.config)) next.config = body.config as Record<string, unknown>;
   next.updatedAt = now();
@@ -570,7 +585,7 @@ admin.patch("/inbounds/:id", requireAdmin, async (c) => {
   }
   await store.put("inbounds", next.id, next);
   await store.put("inbound-sync", next.id, { inboundId: next.id, status: failures.length ? "partial" : "synced", failures, updatedAt: now() });
-  if (inbound.planEnabled !== false || next.planEnabled !== false) {
+  if (planBindingChanged || inbound.planEnabled !== false || next.planEnabled !== false) {
     const users = await listAll<User>(store, "users");
     await Promise.all(users.filter((user) => user.enabled).map((user) => syncUserEntitlements(store, c.env, user.id)));
   }

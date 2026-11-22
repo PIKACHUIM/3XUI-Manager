@@ -52,14 +52,14 @@ type ApiPlan = { id: string; name: string; description: string; group: string; l
 type AdminDashboardData = { users: number; activeUsers: number; activeSubscriptions: number; revenueMinor: number; currency: string; nodesOnline: number; nodesTotal: number; plans: number; pendingOrders: number };
 type AdminUserRecord = { id: string; email: string; role: "admin" | "user"; enabled: boolean; balanceMinor: number; planId: string; planExpiresAt: string | null; planTrafficBytes: number; billedBytes: number; createdAt: string };
 type AdminNodeRecord = { id: string; name: string; region: string; panelUrl: string; publicAddress: string; username: string; basePath: string; status: string; inboundCount: number; enabled: boolean; lastCheckedAt: string | null; syncStatus: string };
-type AdminInboundRecord = { id: string; name: string; protocol: string; network: string; port: number; minimumLevel: number; multiplier: number; enabled: boolean; planEnabled?: boolean; listen?: string; total?: number; expiryTime?: number; trafficReset?: string; trafficResetDay?: number; tag?: string; shareAddrStrategy?: string; shareAddr?: string; subSortIndex?: number; excludeFromSub?: boolean; disableFlow?: boolean; defaultFlow?: string; config: Record<string, unknown> };
+type AdminInboundRecord = { id: string; name: string; protocol: string; network: string; port: number; minimumLevel: number; multiplier: number; enabled: boolean; planEnabled?: boolean; planIds?: string[]; listen?: string; total?: number; expiryTime?: number; trafficReset?: string; trafficResetDay?: number; tag?: string; shareAddrStrategy?: string; shareAddr?: string; subSortIndex?: number; excludeFromSub?: boolean; disableFlow?: boolean; defaultFlow?: string; config: Record<string, unknown> };
 type AdminInboundBinding = { id: string; inboundId: string; nodeId: string; panelInboundId: number };
 type AdminInboundStats = { inboundId: string; nodes: number; clients: number };
 type AdminOrderRecord = UserOrderData & { userId: string; paidAt: string | null };
 type AdminUserRow = { id: string; name: string; email: string; initials: string; color: string; role: string; plan: string; usage: string; date: string; state: string; enabled: boolean };
 type DisplayOrderRow = { id: string; customer: string; email: string; plan: string; amount: string; method: string; date: string; state: string };
 type DisplayPlanRow = { id: string; name: string; detail: string; level: string; traffic: string; price: string; cycle: string; users: string; tone: string; enabled: boolean; hidden: boolean };
-type DisplayInboundRow = { id: string; name: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean };
+type DisplayInboundRow = { id: string; name: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean; plans: string };
 type UserOverviewData = {
   user: AuthenticatedUser & { balanceMinor: number; planLevel: number; planExpiresAt: string | null; createdAt: string; checkinStreak: number; lastCheckinAt: string | null };
   plan: ApiPlan | null;
@@ -613,9 +613,10 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         state: inbound.enabled ? "active" : "disabled",
         enabled: inbound.enabled,
         planEnabled: inbound.planEnabled !== false,
+        plans: (inbound.planIds ?? []).map((planId) => adminPlans.find((plan) => plan.id === planId)?.name ?? planId).join(", "),
       };
     });
-  }, [adminInbounds, adminBindings, adminInboundStats, adminNodes]);
+  }, [adminInbounds, adminBindings, adminInboundStats, adminNodes, adminPlans]);
   const orderDisplayRows: DisplayOrderRow[] = admin
     ? adminOrders.map((order) => {
       const user = adminUsers.find((item) => item.id === order.userId);
@@ -907,7 +908,7 @@ const inboundDefaults: Record<string, string | boolean> = {  protocol: "vless", 
   sockTproxy: "off", sockDomainStrategy: "", sockDialerProxy: "", sockInterface: "", sockMark: "0", sockHappyEyeballsTryDelayMs: "0", sockHappyEyeballsPrioritizeIPv4: false, sockHappyEyeballsInterleave: false, sockHappyEyeballsMaxConcurrentTry: "0",
   sockCustomSockopt: "", tcpMasks: "", udpMasks: "", streamExtra: "", sniffExtra: "",
   sniffEnabled: true, sniffDest: "http,tls,quic,fakedns", sniffMetadataOnly: false, sniffRouteOnly: false, sniffDomainsExcluded: "", sniffIpsExcluded: "",
-  planEnabled: true, baseConfig: "{}",
+  planEnabled: true, planIds: "", baseConfig: "{}",
 };
 
 const inboundProtocolLabels: Record<string, string> = { vless: "VLESS", vmess: "VMess", trojan: "Trojan", shadowsocks: "Shadowsocks", "dokodemo-door": "Dokodemo-door", http: "HTTP", socks: "SOCKS", mixed: "Mixed", wireguard: "WireGuard" };
@@ -1216,7 +1217,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
           if (duplicate) { setInboundTab("protocol"); throw new Error(`${text("客户端邮箱不能重复：", "Duplicate client email: ")}${duplicate}`); }
         }
         const clientPayload = clients.map((draft) => clientDraftPayload(draft, String(fields.protocol)));
-        body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig({ ...fields, clients: JSON.stringify(clientPayload) }), ...(!initial ? { nodeIds } : {}) };
+        body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, planIds: String(fields.planIds ?? "").split(",").filter(Boolean), enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig({ ...fields, clients: JSON.stringify(clientPayload) }), ...(!initial ? { nodeIds } : {}) };
       } else if (initial) {
         body = { role: fields.role, enabled: fields.enabled === true, planExpiresAt: fields.planExpiresAt ? new Date(String(fields.planExpiresAt)).toISOString() : null };
       } else {
@@ -1438,11 +1439,21 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
 
             <div className="admin-form-tabpanel" hidden={inboundTab !== "plans"}>
               {formSection(text("套餐与分配", "Plans and access"), <>
+                {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
                 {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
                 {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
-                {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
               </>)}
-              <div className="admin-form-note">{text("套餐等级的账户只会在「对套餐启用」且等级不低于最低套餐等级时获得该入站的客户端；保存后会立即为现有用户下发并重同步。", "Accounts whose plan level meets the minimum receive a client for this inbound only when it is provisioned for plans; saving provisions and resyncs existing users right away.")}</div>
+              <fieldset className="admin-node-options">
+                <legend>{text("绑定套餐（可多选）", "Bound plans (multi-select)")}</legend>
+                {plans.map((plan) => (
+                  <label key={plan.id}>
+                    <input type="checkbox" checked={String(fields.planIds ?? "").split(",").includes(plan.id)} onChange={toggleListField("planIds", plan.id)} />
+                    <span>{plan.name} · {text(`等级 ${plan.level}`, `Level ${plan.level}`)}{plan.enabled ? "" : ` · ${text("已停用", "disabled")}`}</span>
+                  </label>
+                ))}
+                {!plans.length && <span className="admin-form-note">{text("还没有套餐，先到套餐页创建。", "No plans yet — create one on the plans page.")}</span>}
+              </fieldset>
+              <div className="admin-form-note">{text("勾选套餐后，入站只对这些套餐的用户下发客户端；不勾选则回落到「最低套餐等级」。同一入站可绑多个套餐，也可是多个入站的成员，用户在主套餐对应的入站-节点上拿到同一套客户端。保存后会立即为现有用户下发并重同步。", "Once plans are picked, the inbound provisions clients only for those plans; leave empty to fall back to the minimum plan level. One inbound can serve several plans and several inbounds can serve the same plan — a user receives the same client on every inbound-node pair of their current plan. Saving provisions and resyncs existing users right away.")}</div>
             </div>
 
             <div className="admin-form-tabpanel" hidden={inboundTab !== "advanced"}>
@@ -1870,7 +1881,7 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn
           {rows.map((row) => <tr key={row.id}>
             <td className="cell-title"><div className="table-person"><span className="inbound-symbol"><Network size={16} /></span><span><b>{row.name}</b><small>{row.address}</small></span></div></td>
             <td data-label={t("nodes")}>{row.node}</td>
-            <td data-label={t("level")}><span className="role-chip">{row.level}</span>{!row.planEnabled && <span className="role-chip">{say(locale, "未对套餐启用", "No plan")}</span>}</td>
+            <td data-label={t("level")}><span className="role-chip">{row.level}</span>{row.plans && <span className="role-chip">{row.plans}</span>}{!row.planEnabled && <span className="role-chip">{say(locale, "未对套餐启用", "No plan")}</span>}</td>
             <td data-label={t("multiplierLabel")}><span className="multiplier-chip"><Zap size={12} />{row.multiplier}</span></td>
             <td data-label={t("clientCount")}>{row.clients}</td>
             <td data-label={t("status")}><span className={`status-chip ${row.enabled ? "" : "pending"}`}><i />{row.enabled ? t("enabled") : t("disabled")}</span></td>

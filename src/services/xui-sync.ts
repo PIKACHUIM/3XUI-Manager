@@ -30,7 +30,7 @@ export async function syncUserEntitlements(store: DocumentStore, env: RuntimeEnv
     listAll<Inbound>(store, "inbounds"),
     listAll<ClientMapping>(store, "clients", `${userId}:`),
   ]);
-  const enabledInboundIds = new Set(inbounds.filter((inbound) => servesPlan(inbound, user.planLevel)).map((inbound) => inbound.id));
+  const enabledInboundIds = new Set(inbounds.filter((inbound) => servesPlan(inbound, user)).map((inbound) => inbound.id));
   const byInbound = new Map(mappings.map((mapping) => [mapping.inboundId, mapping]));
   const now = new Date().toISOString();
   let success = 0;
