@@ -329,6 +329,18 @@ admin.post("/nodes/:id/test", requireAdmin, async (c) => {
   return c.json({ probe, node: safeNode(node) });
 });
 
+admin.post("/nodes/:id/vless-keys", requireAdmin, async (c) => {
+  const node = await c.get("store").get<NodeRecord>("nodes", c.req.param("id") ?? "");
+  if (!node) return c.json({ error: "Node not found." }, 404);
+  if (!node.enabled) return c.json({ error: "Node is disabled." }, 422);
+  try {
+    const items = await (await ThreeXuiClient.connect(c.env, node)).newVlessEnc();
+    return c.json({ items });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unable to generate VLESS keys." }, 502);
+  }
+});
+
 admin.patch("/nodes/:id", requireAdmin, async (c) => {
   const store = c.get("store");
   const node = await store.get<NodeRecord>("nodes", c.req.param("id") ?? "");

@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Check, ChevronDown,
   ChevronLeft, ChevronRight, CircleHelp, Command, CreditCard, Globe2, Gauge,
-  LayoutDashboard, LifeBuoy, LogOut, Menu, Moon, MoreHorizontal, Network, Palette, Pencil, Plus, Power,
-  Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Trash2, Users,
+  Layers, LayoutDashboard, LifeBuoy, LogOut, Menu, Moon, MoreHorizontal, Network, Palette, Pencil, Plus, Power,
+  Search, Settings2, ShieldCheck, Sun, Trash2, Users,
   Wallet, Wifi, X, Zap, type LucideIcon
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
 import { detectLocale, EN_MESSAGES, LOCALE_META, LOCALES, localeDirection, messages, phrase, pick, saveLocale, say, type Locale, type MessageKey } from "../lib/i18n";
-import { buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, jsonObject, kcpHeaderTypes, localDateTime, plainObject, tlsVersions, trafficResetUnits, xhttpModes } from "../lib/inbound-config";
+import { autoInboundTag, buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, jsonObject, kcpHeaderTypes, localDateTime, maskRows, maskRowsJson, plainObject, quicBbrProfiles, quicCongestions, tcpMaskPresets, tcpMaskTypes, tlsVersions, trafficResetUnits, udpMaskTypes, xdriveServices, xhttpModes, type MaskRow } from "../lib/inbound-config";
 
 import { HelpPage } from "./HelpPage";
 import { SubscriptionLinks, type SubscriptionLinksData } from "./SubscriptionLinks";
@@ -22,7 +22,7 @@ const userMenu: MenuItem[] = [
   { key: "overview", icon: LayoutDashboard, label: "overview" },
   { key: "subscription", icon: CreditCard, label: "subscription" },
   { key: "nodes", icon: Network, label: "nodes" },
-  { key: "plans", icon: Sparkles, label: "plans" },
+  { key: "plans", icon: Layers, label: "plans" },
   { key: "account", icon: Wallet, label: "account" },
   { key: "checkin", icon: Zap, label: "checkin" },
 ];
@@ -31,7 +31,7 @@ const adminMenu: MenuItem[] = [
   { key: "users", icon: Users, label: "users" },
   { key: "nodes", icon: Network, label: "nodes" },
   { key: "inbounds", icon: Globe2, label: "inbounds" },
-  { key: "plans", icon: Sparkles, label: "plans" },
+  { key: "plans", icon: Layers, label: "plans" },
   { key: "orders", icon: CreditCard, label: "orders" },
   { key: "system", icon: Settings2, label: "system" },
 ];
@@ -174,34 +174,38 @@ function LanguageMenu({ locale, onChange, label }: { locale: Locale; onChange: (
   );
 }
 
-function heroTitle(locale: Locale, kind: "user" | "admin"): { lead: string; accent: string } {
-  return pick(locale, kind === "user" ? {
-    zh: { lead: "连接世界，", accent: "轻松自在。" },
-    en: { lead: "The whole world, ", accent: "within reach." },
-    "zh-TW": { lead: "連接世界，", accent: "輕鬆自在。" },
-    ja: { lead: "世界を、", accent: "もっと身近に。" },
-    ko: { lead: "전 세계를 ", accent: "손안에." },
-    de: { lead: "Die ganze Welt, ", accent: "ganz nah." },
-    es: { lead: "Todo el mundo, ", accent: "a tu alcance." },
-    pt: { lead: "O mundo inteiro, ", accent: "ao seu alcance." },
-    it: { lead: "Tutto il mondo, ", accent: "a portata di mano." },
-    ar: { lead: "العالم كله ", accent: "في متناولك." },
-    ru: { lead: "Весь мир ", accent: "под рукой." },
-    fr: { lead: "Le monde entier, ", accent: "à portée de main." },
-  } : {
-    zh: { lead: "一切尽在掌握，", accent: "从容管理。" },
-    en: { lead: "Everything in sync. ", accent: "Keep things moving." },
-    "zh-TW": { lead: "一切盡在掌握，", accent: "從容管理。" },
-    ja: { lead: "すべてを把握し、", accent: "余裕の運用を。" },
-    ko: { lead: "모든 것을 파악하고 ", accent: "여유롭게 관리하세요." },
-    de: { lead: "Alles im Blick, ", accent: "gelassen verwalten." },
-    es: { lead: "Todo bajo control, ", accent: "gestiona con calma." },
-    pt: { lead: "Tudo sob controlo, ", accent: "gerir com calma." },
-    it: { lead: "Tutto sotto controllo, ", accent: "gestisci con calma." },
-    ar: { lead: "كل شيء تحت السيطرة، ", accent: "أدر بسهولة." },
-    ru: { lead: "Всё под контролем — ", accent: "управляйте спокойно." },
-    fr: { lead: "Tout est maîtrisé, ", accent: "gardez le rythme." },
-  });
+/** What the current page shows, stated as fact instead of a slogan. */
+function pageSummary(page: PageKey, admin: boolean, locale: Locale): string {
+  switch (page) {
+    case "overview":
+      return admin
+        ? say(locale, "用户、订单与节点的当前状态", "Current state of users, orders and nodes")
+        : say(locale, "套餐、流量与节点的当前状态", "Current state of your plan, traffic and nodes");
+    case "subscription":
+      return say(locale, "订阅链接与客户端配置", "Subscription links and client configuration");
+    case "nodes":
+      return say(locale, "节点连接状态与负载", "Node status and load");
+    case "plans":
+      return admin
+        ? say(locale, "套餐价格、流量与有效期", "Plan pricing, traffic and validity")
+        : say(locale, "可购买或升级的套餐", "Plans you can buy or upgrade to");
+    case "account":
+      return say(locale, "余额、账户信息与近期订单", "Balance, account details and recent orders");
+    case "checkin":
+      return say(locale, "每日签到与流量奖励记录", "Daily check-in and traffic rewards");
+    case "users":
+      return say(locale, "账户、套餐、用量与余额", "Accounts, plans, usage and balance");
+    case "inbounds":
+      return say(locale, "入站配置与套餐绑定", "Inbound configuration and plan binding");
+    case "orders":
+      return say(locale, "订单状态与支付方式", "Order status and payment method");
+    case "system":
+      return say(locale, "验证码、邮件、支付与签到设置", "Verification, email, payment and check-in settings");
+    case "help":
+      return say(locale, "客户端下载与订阅导入说明", "Client downloads and subscription import");
+    default:
+      return "";
+  }
 }
 
 type TurnstileApi = {
@@ -325,7 +329,7 @@ function AuthScreen({ onAuthenticated, initialError, turnstileSiteKey, turnstile
   };
 
   const title = mode === "bootstrap" ? say(locale, "创建管理员", "Create administrator") : mode === "register" ? say(locale, "创建你的账号", "Create your account") : say(locale, "欢迎回来", "Welcome back");
-  return <main className={`auth-shell ${authTheme}`}><section className="auth-card"><div className="brand-mark"><span /><span /><span /></div><div className="auth-brand"><strong>3xui<span>.</span></strong><small>MANAGER</small></div><span className="section-kicker">{say(locale, "安全接入", "SECURE ACCESS")}</span><h1>{title}</h1><p className="auth-intro">{say(locale, "在一个地方管理订阅、流量与已连接节点。", "Manage your subscriptions, traffic and connected nodes from one place.")}</p>
+  return <main className={`auth-shell ${authTheme}`}><section className="auth-card"><div className="brand-mark"><span /><span /><span /></div><div className="auth-brand"><strong>3xui<span>.</span></strong><small>MANAGER</small></div><span className="section-kicker">{mode === "bootstrap" ? say(locale, "首次设置", "First-time setup") : mode === "register" ? say(locale, "创建账号", "Create account") : say(locale, "账号登录", "Account sign-in")}</span><h1>{title}</h1>
     <form className="auth-form" onSubmit={submit}><label>{mode === "login" ? say(locale, "邮箱或用户名", "Email or username") : say(locale, "邮箱地址", "Email address")}<input type={mode === "login" ? "text" : "email"} autoComplete={mode === "login" ? "username" : "email"} value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={254} /></label><label>{say(locale, "密码", "Password")}<input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={mode === "login" ? 1 : 12} maxLength={256} /></label>{mode === "register" && <label>{say(locale, "邀请码", "Invitation code")} <span className="auth-optional">{say(locale, "选填", "optional")}</span><input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} maxLength={100} /></label>}{mode === "bootstrap" && <label>{say(locale, "管理员初始化令牌", "Administrator bootstrap token")}<input type="password" value={bootstrapToken} onChange={(event) => setBootstrapToken(event.target.value)} required autoComplete="off" /></label>}{mode === "register" && turnstileRequired && turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} action="signup" resetKey={turnstileResetKey} onToken={setTurnstileToken} locale={locale} />}{mode === "register" && turnstileRequired && !turnstileSiteKey && securityConfigLoaded && <div className="auth-message error" role="alert">{say(locale, "需要人机验证，但尚未配置 Site Key。", "Turnstile is required but no site key is configured.")}</div>}{error && <div className="auth-message error" role="alert">{error}</div>}{message && <div className="auth-message" role="status">{message}</div>}<button className="primary-button auth-submit" disabled={busy}>{busy ? say(locale, "请稍候…", "Please wait…") : mode === "bootstrap" ? say(locale, "创建管理员", "Create administrator") : mode === "register" ? say(locale, "创建账号", "Create account") : say(locale, "登录", "Sign in")}</button></form>
     <div className="auth-switches">{mode !== "login" && <button type="button" onClick={() => { setMode("login"); setError(""); setMessage(""); }}>{say(locale, "登录", "Sign in")}</button>}{mode !== "register" && <button type="button" onClick={() => { setMode("register"); setError(""); setMessage(""); }}>{say(locale, "创建账号", "Create account")}</button>}{mode !== "bootstrap" && <button type="button" onClick={() => { setMode("bootstrap"); setError(""); setMessage(""); }}>{say(locale, "首次管理员初始化", "First-time admin setup")}</button>}</div>
   </section><span className="auth-foot">{say(locale, "凭据由 HttpOnly 会话 Cookie 保护。", "Credentials are protected by an HttpOnly session cookie.")}</span></main>;
@@ -395,6 +399,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
   const [theme, setTheme] = useState<Theme>(() => detectTheme());
   const [accent, setAccent] = useState("cyan");
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState("");
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -446,6 +451,15 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
     };
     query.addEventListener("change", handleSystemTheme);
     return () => query.removeEventListener("change", handleSystemTheme);
+  }, []);
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
   }, []);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 900px)").matches) { setMobileOpen(false); return; }
@@ -802,10 +816,9 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         </nav>
         <div className="sidebar-bottom">
           <div className="sync-card">
-            <div className="sync-card-top"><span className="sync-icon"><Activity size={15} /></span><span className="sync-live"><i /> {apiError ? "ERROR" : apiLoading ? "LOADING" : "READY"}</span></div>
+            <div className="sync-card-top"><span className="sync-icon"><Activity size={15} /></span><span className="sync-live"><i /> {apiError ? say(locale, "异常", "Error") : apiLoading ? say(locale, "加载中", "Loading") : say(locale, "正常", "OK")}</span></div>
             <b>{say(locale, "账户 API", "Account API")}</b>
-            <small>{apiError || (say(locale, "显示来自服务端的数据", "Account data loaded from the server"))}</small>
-            <div className="sync-foot"><span>{say(locale, "数据状态", "Data status")}</span><span>{apiError ? (say(locale, "不可用", "Unavailable")) : apiLoading ? (say(locale, "加载中", "Loading")) : (say(locale, "已加载", "Loaded"))}</span></div>
+            <small>{apiError || (apiLoading ? say(locale, "正在加载账户数据…", "Loading account data…") : say(locale, "数据来自服务端", "Account data loaded from the server"))}</small>
           </div>
           <button className={`nav-item help-item ${page === "help" ? "selected" : ""}`} aria-current={page === "help" ? "page" : undefined} title={say(locale, "帮助与支持", "Help & support")} onClick={() => { setPage("help"); setSearch(""); setEditor(null); setMobileOpen(false); }}><LifeBuoy size={18} /><span>{say(locale, "帮助与支持", "Help & support")}</span></button>
           <div className="profile-row"><div className="avatar avatar-mint">{initials}</div><div className="profile-copy" title={sessionUser.email}><b>{sessionUser.email}</b><small>{admin ? t("adminPortal") : t("userPortal")}</small></div><button className="profile-more" aria-label={t("settings")} onClick={() => setPage("account")}><MoreHorizontal size={19} /></button></div>
@@ -816,7 +829,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         <header className="topbar">
           <div className="topbar-left"><button className="mobile-menu icon-button" aria-label={say(locale, "打开菜单", "Open menu")} onClick={() => setMobileOpen(true)}><Menu size={19} /></button><div className="breadcrumbs"><span>{admin ? t("adminPortal") : t("userPortal")}</span><ChevronRight size={14} /><b>{title}</b></div></div>
           <div className="topbar-actions">
-            <label className="global-search"><Search size={16} /><input aria-label={t("search")} placeholder={t("searchPlaceholder")} value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></label>
+            <label className="global-search"><Search size={16} /><input ref={searchInputRef} aria-label={t("search")} placeholder={t("searchPlaceholder")} value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></label>
             {canAdmin && <div className="role-switch"><button className={!admin ? "on" : ""} onClick={() => { setAdmin(false); setPage("overview"); }}>{t("customer")}</button><button className={admin ? "on" : ""} onClick={() => { setAdmin(true); setPage("overview"); }}>{t("admin")}</button></div>}
             <div className="language-switch"><LanguageMenu locale={locale} onChange={changeLocale} label={t("language")} /></div>
             <div className="header-divider" />
@@ -829,7 +842,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         </header>
 
         <section className="page-content">
-          <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> {admin ? t("management") : say(locale, "个人空间", "PERSONAL SPACE")}<span className="eyebrow-line" /></div><h1>{page === "overview" ? <>{t("hello")}, <span>{sessionUser.email.split("@")[0]}.</span></> : title}</h1><p>{page === "overview" ? t("dashboardSub") : <>{t("manageTitle")} <span className="heading-accent">{title.toLowerCase()}</span> {t("manageSuffix")}.</>}</p></div><div className="heading-actions">{admin && createKind && <button className="primary-button small" type="button" onClick={() => setEditor({ kind: createKind })}>{createLabel}</button>}<span className="safe-tag"><ShieldCheck size={14} /> {t("statusGood")}</span></div></div>
+          <div className="page-heading"><div><h1>{page === "overview" ? <>{t("hello")}, <span>{sessionUser.email.split("@")[0]}.</span></> : title}</h1><p>{pageSummary(page, admin, locale)}</p></div><div className="heading-actions">{admin && createKind && <button className="primary-button small" type="button" onClick={() => setEditor({ kind: createKind })}>{createLabel}</button>}</div></div>
 
           {apiLoading && <div className="auth-message" role="status">{say(locale, "正在加载账户数据…", "Loading account data…")}</div>}
           {apiError && <div className="auth-message error" role="alert">{apiError}</div>}
@@ -849,7 +862,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
           {page === "account" && <AccountPage t={t} locale={locale} user={sessionUser} overview={overview} rows={orderDisplayRows} onNavigate={setPage} />}
           {page === "checkin" && <CheckinPage t={t} locale={locale} attendance={overview?.attendance ?? null} available={Boolean(overview?.capabilities.trafficMetering)} securityConfigAvailable={publicConfig !== null} turnstileRequired={Boolean(publicConfig?.checkinTurnstileEnabled)} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} busy={checkinBusy} onCheckin={(token) => { void submitCheckin(token); }} />}
           {page === "system" && <SystemPage t={t} locale={locale} onSaved={async () => { setRefreshToken((value) => value + 1); await onSettingsSaved(); }} theme={theme} accent={accent} onTheme={chooseTheme} onAccent={setAccent} onLocale={changeLocale} onAction={(label) => flash(label)} />}
-          <footer className="page-footer"><span>© 2025 3XUI Manager</span><span><i /> {t("apiStatus")} <b>·</b> {admin ? t("d1Mode") : t("planName")}</span></footer>
+          <footer className="page-footer"><span>© {new Date().getFullYear()} 3XUI Manager</span><span><i /> {t("apiStatus")}</span></footer>
         </section>
       </main>
       {notice && <div className="toast"><span className="toast-check"><Check size={14} /></span>{notice}<button aria-label={say(locale, "关闭提示", "Dismiss")} onClick={() => setNotice("")}><X size={14} /></button></div>}
@@ -865,7 +878,7 @@ type InboundTabKey = "basic" | "protocol" | "stream" | "security" | "sniffing" |
 /** Defaults for the complete 3X-UI inbound field set rendered by the admin form. */
 const inboundDefaults: Record<string, string | boolean> = {  protocol: "vless", network: "tcp", port: "443", listen: "", minimumLevel: "0", multiplier: "1", security: "none",
   totalGb: "", expiryTime: "", trafficReset: "never", trafficResetDay: "0", tag: "", shareAddrStrategy: "node", shareAddr: "", subSortIndex: "1", excludeFromSub: false, disableFlow: false,
-  clientFlow: "", vlessDecryption: "none", protocolFallbacks: "", protocolAccounts: "",
+  clientFlow: "", vlessDecryption: "none", vlessEncryption: "none", protocolFallbacks: "", protocolAccounts: "",
   ssMethod: "2022-blake3-aes-128-gcm", ssPassword: "", ssNetwork: "tcp,udp",
   dokodemoAddress: "", dokodemoPort: "0", dokodemoNetwork: "tcp", dokodemoFollowRedirect: false, dokodemoTimeout: "300",
   proxyAuth: "noauth", proxyUdp: false, proxyIp: "", httpAllowTransparent: false, httpUserLevel: "0",
@@ -879,19 +892,53 @@ const inboundDefaults: Record<string, string | boolean> = {  protocol: "vless", 
   kcpMtu: "1350", kcpTti: "20", kcpUplinkCapacity: "5", kcpDownlinkCapacity: "20", kcpCwndMultiplier: "1", kcpMaxSendingWindow: "2097152", kcpCongestion: false, kcpReadBufferSize: "0", kcpWriteBufferSize: "0", kcpHeaderType: "none", kcpSeed: "",
   tcpHeader: "none", tcpAcceptProxyProtocol: false, tcpRequest: "", tcpResponse: "",
   hysteriaVersion: "2", hysteriaAuth: "", hysteriaUdpIdleTimeout: "60", hysteriaMasquerade: "",
+  xdriveService: "google-drive", xdriveRemoteFolder: "", xdriveSecrets: "", xdriveSegmentBytes: "", xdriveFlushIntervalMs: "", xdrivePollIntervalMs: "", xdriveMaxPollIntervalMs: "",
+  xdriveSessionTtlSeconds: "", xdriveConcurrency: "", xdriveEagerWindowMs: "", xdriveHoleTimeoutMs: "", xdriveS3Endpoint: "", xdriveS3Region: "", xdriveS3Bucket: "",
+  xdriveS3PathStyle: true, xdriveTemplate: "", xdriveXmux: "", xdriveFront: "", xdriveFrontPort: "",
+  quicCongestion: "", quicBbrProfile: "", quicBrutalUp: "", quicBrutalDown: "", quicUdpHopPorts: "", quicUdpHopInterval: "",
+  quicInitStreamReceiveWindow: "", quicMaxStreamReceiveWindow: "", quicInitConnectionReceiveWindow: "", quicMaxConnectionReceiveWindow: "",
+  quicMaxIdleTimeout: "", quicKeepAlivePeriod: "", quicMaxIncomingStreams: "", quicDebug: false, quicBrutalDisableLossCompensation: false,
+  quicDisablePathMTUDiscovery: false, quicDisableChromeParrot: false, quicDisableGSO: false, quicDisableStatelessReset: false, quicExtra: "",
   tlsSni: "", tlsAlpn: "h2,http/1.1", tlsCipherSuites: "", tlsMinVersion: "", tlsMaxVersion: "", tlsFingerprint: "", tlsCurves: "", tlsRejectUnknownSni: false, tlsDisableSystemRoot: false, tlsSessionResumption: "", tlsMasterKeyLog: "", tlsEchSockopt: "",
   tlsCertFile: "", tlsKeyFile: "", tlsCertPem: "", tlsKeyPem: "", tlsCertUsage: "", tlsCertOcspStapling: false, tlsCertOneTimeLoading: false, tlsCertBuildChain: false, tlsCertificates: "",
   realityDest: "", realitySni: "", realityPrivateKey: "", realityPublicKey: "", realityShortIds: "", realityFingerprint: "chrome", realitySpiderX: "/", realityShow: false, realityXver: "0",
   realityMinClientVer: "", realityMaxClientVer: "", realityMaxTimediff: "0", realityMldsa65Seed: "", realityMldsa65Verify: "",
   sockTcpFastOpen: false, sockTcpNoDelay: false, sockTcpMptcp: false, sockTcpCongestion: "", sockTcpKeepAliveIdle: "0", sockTcpKeepAliveInterval: "0", sockTcpUserTimeout: "0", sockTcpWindowClamp: "0", sockTcpMaxSeg: "0",
   sockTproxy: "off", sockDomainStrategy: "", sockDialerProxy: "", sockInterface: "", sockMark: "0", sockHappyEyeballsTryDelayMs: "0", sockHappyEyeballsPrioritizeIPv4: false, sockHappyEyeballsInterleave: false, sockHappyEyeballsMaxConcurrentTry: "0",
-  sockCustomSockopt: "", tcpMasks: "", udpMasks: "",
+  sockCustomSockopt: "", tcpMasks: "", udpMasks: "", streamExtra: "", sniffExtra: "",
   sniffEnabled: true, sniffDest: "http,tls,quic,fakedns", sniffMetadataOnly: false, sniffRouteOnly: false, sniffDomainsExcluded: "", sniffIpsExcluded: "",
   planEnabled: true, baseConfig: "{}",
 };
 
 const inboundProtocolLabels: Record<string, string> = { vless: "VLESS", vmess: "VMess", trojan: "Trojan", shadowsocks: "Shadowsocks", "dokodemo-door": "Dokodemo-door", http: "HTTP", socks: "SOCKS", mixed: "Mixed", wireguard: "WireGuard" };
-const inboundNetworkLabels: Record<string, string> = { tcp: "TCP", raw: "Raw", ws: "WebSocket", http: "HTTP/2", httpupgrade: "HTTP Upgrade", grpc: "gRPC", xhttp: "XHTTP", kcp: "mKCP", hysteria: "Hysteria" };
+const inboundNetworkLabels: Record<string, string> = { tcp: "TCP", raw: "Raw", ws: "WebSocket", http: "HTTP/2", httpupgrade: "HTTP Upgrade", grpc: "gRPC", xhttp: "XHTTP", kcp: "mKCP", hysteria: "Hysteria", xdrive: "XDRIVE" };
+
+/** VLESS auth modes 3X-UI can generate, matching `lib/xray/vless-encryption.ts`. */
+const vlessAuthKinds = ["x25519", "x25519_xorpub", "x25519_random", "mlkem768", "mlkem768_xorpub", "mlkem768_random"] as const;
+
+/** Picks the panel key block that belongs to a generated auth kind. */
+function matchesVlessAuth(block: { label?: string; id?: string }, kind: string): boolean {
+  if (block.id === kind) return true;
+  const label = (block.label ?? "").toLowerCase().replace(/[-_\s]/g, "");
+  if (kind === "mlkem768") return label.includes("mlkem768") && !label.includes("xorpub") && !label.includes("random");
+  if (kind === "x25519") return label.includes("x25519") && !label.includes("xorpub") && !label.includes("random");
+  if (kind === "mlkem768_xorpub") return label.includes("mlkem768") && label.includes("xorpub");
+  if (kind === "mlkem768_random") return label.includes("mlkem768") && label.includes("random");
+  if (kind === "x25519_xorpub") return label.includes("x25519") && label.includes("xorpub");
+  if (kind === "x25519_random") return label.includes("x25519") && label.includes("random");
+  return false;
+}
+
+/** Parses the fallback array without losing a hand-written payload that is not valid JSON. */
+function parseFallbackRows(raw: string): { rows: Array<Record<string, unknown>>; broken: boolean } {
+  const source = raw.trim();
+  if (!source) return { rows: [], broken: false };
+  try {
+    const parsed: unknown = JSON.parse(source);
+    if (!Array.isArray(parsed)) return { rows: [], broken: true };
+    return { rows: parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)), broken: false };
+  } catch { return { rows: [], broken: true }; }
+}
 
 function trafficResetLabel(value: string, text: (zh: string, en: string) => string): string {
   if (value === "hourly") return text("每小时", "Hourly");
@@ -907,6 +954,8 @@ const inboundJsonFields: Array<[string, "object" | "array"]> = [
   ["settingsExtra", "object"], ["tcpRequest", "object"], ["tcpResponse", "object"], ["wsHeaders", "object"], ["h2Headers", "object"],
   ["upgradeHeaders", "object"], ["xhttpHeaders", "object"], ["tlsEchSockopt", "object"], ["tlsCertificates", "array"],
   ["hysteriaMasquerade", "object"], ["sockCustomSockopt", "array"], ["tcpMasks", "array"], ["udpMasks", "array"], ["baseConfig", "object"],
+  ["xdriveTemplate", "object"], ["xdriveXmux", "object"], ["quicExtra", "object"],
+  ["streamExtra", "object"], ["sniffExtra", "object"],
 ];
 
 /** One editable client of the inbound, mirroring a 3X-UI client entry. */
@@ -1000,19 +1049,38 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   const [nodeIds, setNodeIds] = useState<string[]>(() => initial && kind === "inbound" ? bindings.filter((binding) => binding.inboundId === initial.id).map((binding) => binding.nodeId) : kind === "inbound" && nodes.length ? [nodes[0].id] : []);
   const [clients, setClients] = useState<InboundClientDraft[]>(() => (kind === "inbound" ? inboundClientDrafts(initial as AdminInboundRecord | undefined) : []));
   const [inboundTab, setInboundTab] = useState<InboundTabKey>("basic");
+  const [inboundAdvancedTab, setInboundAdvancedTab] = useState<"all" | "settings" | "stream" | "sniffing">("all");
+  const [vlessKeyKind, setVlessKeyKind] = useState<string>("mlkem768");
+  const [vlessKeyBusy, setVlessKeyBusy] = useState(false);
+  const [autoTag, setAutoTag] = useState<boolean>(() => {
+    if (kind !== "inbound") return false;
+    const current = String((initial as AdminInboundRecord | undefined)?.tag ?? "").trim();
+    return !current || /^in-\d+-(tcp|udp|tcpudp)$/.test(current);
+  });
+  const [maskError, setMaskError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const text = (zh: string, en: string) => say(locale, zh, en);
   const inboundTabItems: Array<[InboundTabKey, string]> = [
-    ["basic", text("基本", "Basic")], ["protocol", text("协议", "Protocol")], ["stream", text("传输", "Transport")],
-    ["security", text("安全", "Security")], ["sniffing", text("嗅探", "Sniffing")], ["plans", text("套餐", "Plans")], ["advanced", text("高级", "Advanced")],
+    ["basic", text("基础配置", "Basics")], ["protocol", text("协议", "Protocol")], ["stream", text("传输", "Transport")],
+    ["security", text("安全", "Security")], ["sniffing", text("嗅探", "Sniffing")], ["plans", text("套餐", "Plans")], ["advanced", text("高级配置", "Advanced")],
   ];
+  const fallbackParse = parseFallbackRows(String(fields.protocolFallbacks ?? ""));
+  const tcpMaskParse = maskRows(fields.tcpMasks);
+  const udpMaskParse = maskRows(fields.udpMasks);
+  const generatedTag = autoInboundTag(fields);
+  useEffect(() => {
+    if (!autoTag) return;
+    setFields((current) => (current.tag === generatedTag ? current : { ...current, tag: generatedTag }));
+  }, [autoTag, generatedTag]);
+  const protocolTabVisible = String(fields.protocol) !== "vmess" || fallbackParse.rows.length > 0;
+  const securityTabVisible = String(fields.protocol) !== "wireguard";
   const planEditingDefault = kind === "plan" && initial ? (initial as ApiPlan).isDefault : false;
   const title = initial ? kind === "node" ? text("编辑节点", "Edit node") : kind === "inbound" ? text("编辑入站", "Edit inbound") : kind === "plan" ? text("编辑套餐", "Edit plan") : text("编辑用户", "Edit user") : kind === "node" ? text("添加 3X-UI 节点", "Add 3X-UI node") : kind === "inbound" ? text("添加入站", "Add inbound") : kind === "plan" ? text("添加套餐", "Add plan") : text("添加用户", "Add user");
   const field = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => <label><span>{label}</span><input {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
   const wideField = (name: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => <label className="admin-form-wide"><span>{label}</span><input {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
   const checkField = (name: string, label: string) => <label className="admin-form-check"><input type="checkbox" checked={fields[name] === true} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.checked }))} /><span>{label}</span></label>;
-  const selectField = (name: string, label: string, options: Array<[string, string]>) => <label><span>{label}</span><select value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))}>{options.map(([value, optionLabel]) => <option key={value || "-"} value={value}>{optionLabel}</option>)}</select></label>;
+  const selectField = (name: string, label: string, options: Array<[string, string]>, props: React.SelectHTMLAttributes<HTMLSelectElement> = {}) => <label><span>{label}</span><select {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))}>{options.map(([value, optionLabel]) => <option key={value || "-"} value={value}>{optionLabel}</option>)}</select></label>;
   const withDefault = (options: Array<[string, string]>): Array<[string, string]> => [["", text("默认", "Default")], ...options];
   const toggleListField = (name: string, value: string) => (event: React.ChangeEvent<HTMLInputElement>) => setFields((current) => {
     const list = String(current[name] ?? "").split(",").filter(Boolean);
@@ -1038,6 +1106,73 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     raw: {},
   }]);
   const removeClient = (key: string) => setClients((current) => current.filter((client) => client.key !== key));
+  const setFallbackRows = (rows: Array<Record<string, unknown>>) => setFields((current) => ({ ...current, protocolFallbacks: rows.length ? JSON.stringify(rows) : "" }));
+  const patchFallback = (index: number, patch: Record<string, unknown>) => setFallbackRows(fallbackParse.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  const appendFallback = () => setFallbackRows([...fallbackParse.rows, { name: "", alpn: "", path: "", dest: "", xver: 0 }]);
+  const removeFallback = (index: number) => setFallbackRows(fallbackParse.rows.filter((_, i) => i !== index));
+  const maskField = (channel: "tcp" | "udp") => channel === "tcp" ? "tcpMasks" : "udpMasks";
+  const commitMasks = (channel: "tcp" | "udp", rows: MaskRow[]) => {
+    const { value, invalid } = maskRowsJson(rows);
+    if (invalid) {
+      setMaskError(text("每条掩码的 settings 必须是 JSON 对象。", "Every mask's settings must be a JSON object."));
+      return;
+    }
+    setMaskError("");
+    setFields((current) => ({ ...current, [maskField(channel)]: value }));
+  };
+  const patchMask = (channel: "tcp" | "udp", index: number, patch: Partial<MaskRow>) => {
+    const rows = (channel === "tcp" ? tcpMaskParse : udpMaskParse).rows.map((row, i) => (i === index ? { ...row, ...patch } : row));
+    commitMasks(channel, rows);
+  };
+  const addMask = (channel: "tcp" | "udp") => {
+    const rows = [...(channel === "tcp" ? tcpMaskParse : udpMaskParse).rows, { type: channel === "tcp" ? "fragment" : "salamander", settings: "" }];
+    commitMasks(channel, rows);
+  };
+  const removeMask = (channel: "tcp" | "udp", index: number) => {
+    commitMasks(channel, (channel === "tcp" ? tcpMaskParse : udpMaskParse).rows.filter((_, i) => i !== index));
+  };
+  const applyMaskPreset = (name: string) => {
+    setMaskError("");
+    setFields((current) => ({ ...current, tcpMasks: JSON.stringify(tcpMaskPresets[name]) }));
+  };
+  const maskList = (channel: "tcp" | "udp", parse: ReturnType<typeof maskRows>) => {
+    const types = channel === "tcp" ? tcpMaskTypes : udpMaskTypes;
+    return <div className="admin-form-wide inbound-masks">
+      <div className="inbound-masks-head">
+        <div><b>{channel === "tcp" ? text("TCP 掩码", "TCP masks") : text("UDP 掩码", "UDP masks")}</b><small>{text("按顺序套在传输层之后；settings 留空表示使用该类型的默认值。", "Applied after the transport layer; an empty settings object uses the type defaults.")}</small></div>
+        <div className="inbound-masks-actions">
+          {channel === "tcp" && Object.keys(tcpMaskPresets).map((name) => <button key={name} className="outline-button small" type="button" onClick={() => applyMaskPreset(name)}>{name}</button>)}
+          <button className="outline-button small" type="button" disabled={parse.broken} onClick={() => addMask(channel)}><Plus size={13} /> {text("添加掩码", "Add mask")}</button>
+        </div>
+      </div>
+      {parse.broken ? <div className="admin-form-note">{text("当前掩码 JSON 无法解析，请在「高级配置 → 传输」里修正原始 JSON。", "The mask JSON cannot be parsed; fix the raw JSON under Advanced → Stream.")}</div> : parse.rows.length === 0 ? <div className="inbound-clients-empty">{text("还没有掩码。", "No masks yet.")}</div> : parse.rows.map((row, index) => <div className="inbound-mask-row" key={`${channel}-${index}-${row.type}-${row.settings}`}>
+        <select aria-label={text("掩码类型", "Mask type")} value={row.type} onChange={(event) => patchMask(channel, index, { type: event.target.value })}>{types.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <textarea rows={2} spellCheck={false} defaultValue={row.settings} placeholder="{}" onBlur={(event) => patchMask(channel, index, { settings: event.target.value.trim() })} />
+        <button className="quiet-icon danger" type="button" aria-label={text("删除掩码", "Delete mask")} onClick={() => removeMask(channel, index)}><Trash2 size={14} /></button>
+      </div>)}
+    </div>;
+  };
+  const generateVlessKeys = async () => {
+    const boundNodeId = kind === "inbound" && initial ? bindings.find((binding) => binding.inboundId === (initial as AdminInboundRecord).id)?.nodeId : undefined;
+    const nodeId = boundNodeId ?? nodeIds[0];
+    if (!nodeId) {
+      setInboundTab("protocol");
+      setError(text("先绑定一个节点，才能从面板生成密钥。", "Bind a node first so the panel can generate keys."));
+      return;
+    }
+    setVlessKeyBusy(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ items: Array<{ decryption: string; encryption: string; label?: string; id?: string }> }>(`/api/admin/nodes/${nodeId}/vless-keys`, { method: "POST" });
+      const match = result.items.find((item) => matchesVlessAuth(item, vlessKeyKind));
+      if (!match) throw new Error(text("面板没有返回该类型的密钥。", "The panel did not return that key type."));
+      setFields((current) => ({ ...current, vlessDecryption: match.decryption, vlessEncryption: match.encryption }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : text("生成密钥失败。", "Key generation failed."));
+    } finally {
+      setVlessKeyBusy(false);
+    }
+  };
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
@@ -1052,9 +1187,10 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         if (!initial && !String(fields.password) && !String(fields.apiToken)) throw new Error(text("请填写面板密码或 API Token。", "Provide a panel password or API token."));
         body = { name: String(fields.name).trim(), region: fields.region, panelUrl: String(fields.panelUrl).trim(), publicAddress: fields.publicAddress, username: fields.username, basePath: fields.basePath, enabled: fields.enabled === true, ...(fields.password ? { password: fields.password } : {}), ...(fields.apiToken ? { apiToken: fields.apiToken } : {}) };
       } else if (kind === "inbound") {
-        const jsonSection = (name: string) => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? text("协议设置", "Protocol") : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade"].includes(name) ? text("传输方式", "Transport") : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? text("传输安全", "Security") : text("高级设置", "Advanced");
+        const jsonSection = (name: string) => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? text("协议设置", "Protocol") : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade", "xdriveTemplate", "xdriveXmux"].includes(name) ? text("传输方式", "Transport") : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? text("传输安全", "Security") : text("高级设置", "Advanced");
         // Jump to the tab that owns a failing field, the way the 3X-UI form does.
-        const jsonTab = (name: string): InboundTabKey => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? "protocol" : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade"].includes(name) ? "stream" : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? "security" : "advanced";
+        const jsonTab = (name: string): InboundTabKey => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? "protocol" : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade", "xdriveTemplate", "xdriveXmux"].includes(name) ? "stream" : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? "security" : "advanced";
+        if (maskError) { setInboundTab("advanced"); throw new Error(maskError); }
         if (!initial && !nodeIds.length) { setInboundTab("basic"); throw new Error(text("至少选择一个已启用节点。", "Select at least one enabled node.")); }
         const port = Number(fields.port);
         if (!Number.isInteger(port) || port < 1 || port > 65535) { setInboundTab("basic"); throw new Error(text("端口必须在 1-65535 之间。", "Port must be between 1 and 65535.")); }
@@ -1096,6 +1232,11 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (kind !== "inbound") return;
+    if (!protocolTabVisible && inboundTab === "protocol") setInboundTab("basic");
+    if (!securityTabVisible && inboundTab === "security") setInboundTab("stream");
+  }, [kind, inboundTab, protocolTabVisible, securityTabVisible]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onCancel(); };
     window.addEventListener("keydown", onKeyDown);
@@ -1144,18 +1285,27 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         {kind === "inbound" && <div className="inbound-editor">
           <div className="inbound-editor-main">
             <div className="inbound-tabs" role="tablist" aria-label={text("入站设置分区", "Inbound settings sections")}>
-              {inboundTabItems.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={inboundTab === key} className={inboundTab === key ? "active" : ""} onClick={() => setInboundTab(key)}>{label}</button>)}
+              {inboundTabItems.filter(([key]) => (key !== "protocol" || protocolTabVisible) && (key !== "security" || securityTabVisible)).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={inboundTab === key} className={inboundTab === key ? "active" : ""} onClick={() => setInboundTab(key)}>{label}</button>)}
             </div>
             <div className="admin-form-tabpanel" hidden={inboundTab !== "basic"}>
             {formSection(text("基础", "Basics"), <>
               {field("name", text("备注", "Remark"), { required: true, maxLength: 100 })}
-              {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]))}
+              {selectField("protocol", text("协议", "Protocol"), inboundProtocols.map((value): [string, string] => [value, inboundProtocolLabels[value] ?? value]), { disabled: Boolean(initial) })}
               {field("listen", text("监听 IP（留空为全部）", "Listen IP (blank = all)"), { placeholder: "0.0.0.0" })}
               {field("port", text("端口", "Port"), { type: "number", min: 1, max: 65535, step: 1, required: true })}
               {field("totalGb", text("总流量（GB，0 为不限）", "Total (GB, 0 = unlimited)"), { type: "number", min: 0, step: 0.001 })}
               {field("expiryTime", text("到期时间（留空为永久）", "Expiry (blank = never)"), { type: "datetime-local" })}
               {selectField("trafficReset", text("流量重置周期", "Traffic reset"), trafficResetUnits.map((value): [string, string] => [value, trafficResetLabel(value, text)]))}
-              {(fields.trafficReset === "monthly" || fields.trafficReset === "weekly") && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 0, max: 31, step: 1 })}
+              {fields.trafficReset === "monthly" && field("trafficResetDay", text("重置日（1-31）", "Reset day (1-31)"), { type: "number", min: 1, max: 31, step: 1 })}
+            </>)}
+            {formSection(text("订阅与分享", "Subscription and sharing"), <>
+              {selectField("shareAddrStrategy", text("分享地址策略", "Share address strategy"), [["node", text("使用节点地址", "Use the node address")], ["listen", text("使用监听地址", "Use the listen address")], ["custom", text("自定义地址", "Custom address")]])}
+              {fields.shareAddrStrategy === "custom" && field("shareAddr", text("自定义分享地址", "Custom share address"), { maxLength: 255 })}
+              {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
+              {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
+              {fields.protocol === "vless" && checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
+              {field("tag", text("标签", "Tag"), { maxLength: 64, disabled: autoTag, placeholder: generatedTag })}
+              <label className="admin-form-check"><input type="checkbox" checked={autoTag} onChange={(event) => setAutoTag(event.target.checked)} /><span>{text(`自动生成标签（${generatedTag}）`, `Auto-generate the tag (${generatedTag})`)}</span></label>
             </>)}
             <div className="admin-form-inline">{checkField("enabled", text("启用入站", "Inbound enabled"))}</div>
             {!initial && <fieldset className="admin-node-options"><legend>{text("绑定节点", "Bind nodes")}</legend>{nodes.length ? nodes.map((node) => <label key={node.id}><input type="checkbox" checked={nodeIds.includes(node.id)} onChange={(event) => setNodeIds((current) => event.target.checked ? [...current, node.id] : current.filter((id) => id !== node.id))} /><span>{node.name} · {node.region || node.publicAddress}</span></label>) : <small>{text("请先添加并启用节点。", "Add and enable a node first.")}</small>}</fieldset>}
@@ -1164,12 +1314,12 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
             <div className="admin-form-tabpanel" hidden={inboundTab !== "protocol"}>
             {formSection(text("协议设置", "Protocol settings"), <>
               {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 的客户端在右侧列表中维护，协议本身没有额外参数。", "VMess clients live in the client list on the right; the protocol itself has no extra options.")}</div>}
-              {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("VLESS 解密方式", "VLESS decryption"), { placeholder: "none" })}</>}
+              {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("解密（decryption）", "Decryption"), { placeholder: "none" })}{field("vlessEncryption", text("加密（encryption）", "Encryption"), { placeholder: "none" })}<div className="admin-form-wide vless-keygen"><span>{text("生成密钥", "Generate keys")}</span><div className="vless-keygen-row"><select aria-label={text("密钥类型", "Key type")} value={vlessKeyKind} onChange={(event) => setVlessKeyKind(event.target.value)}>{vlessAuthKinds.map((value) => <option key={value} value={value}>{value}</option>)}</select><button className="outline-button" type="button" disabled={vlessKeyBusy} onClick={() => { void generateVlessKeys(); }}>{vlessKeyBusy ? text("生成中…", "Generating…") : text("生成", "Generate")}</button><button className="outline-button" type="button" onClick={() => setFields((current) => ({ ...current, vlessDecryption: "none", vlessEncryption: "none" }))}>{text("清除", "Clear")}</button></div><small>{text("密钥取自面板 /panel/api/server/getNewVlessEnc，等同于 3X-UI 的「生成密钥」。", "Keys come from the panel endpoint behind 3X-UI's Generate keys button.")}</small></div></>}
               {fields.protocol === "shadowsocks" && <>{selectField("ssMethod", text("加密方式", "Cipher"), [["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"], ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm"], ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"], ["aes-128-gcm", "aes-128-gcm"], ["aes-256-gcm", "aes-256-gcm"], ["chacha20-poly1305", "chacha20-poly1305"], ["xchacha20-poly1305", "xchacha20-poly1305"], ["none", text("无", "None")]])}{field("ssPassword", text("入站密码", "Inbound password"))}{field("ssNetwork", text("网络（tcp,udp）", "Network (tcp,udp)"))}</>}
               {fields.protocol === "dokodemo-door" && <>{field("dokodemoAddress", text("目标地址", "Destination address"), { placeholder: "1.1.1.1" })}{field("dokodemoPort", text("目标端口", "Destination port"), { type: "number", min: 0, max: 65535, step: 1 })}{selectField("dokodemoNetwork", text("网络", "Network"), [["tcp", "TCP"], ["udp", "UDP"], ["tcp,udp", "TCP+UDP"]])}{checkField("dokodemoFollowRedirect", text("跟随原始目标地址", "Follow redirect"))}{field("dokodemoTimeout", text("超时（秒）", "Timeout (seconds)"), { type: "number", min: 0, step: 1 })}</>}
               {(fields.protocol === "http" || fields.protocol === "socks" || fields.protocol === "mixed") && <>{selectField("proxyAuth", text("认证方式", "Authentication"), [["noauth", text("无认证", "No auth")], ["password", text("用户名密码", "Username and password")]])}{areaField("protocolAccounts", text("账户（JSON 数组）", "Accounts (JSON array)"), { placeholder: '[{"user":"name","pass":"secret"}]' })}{fields.protocol !== "http" && checkField("proxyUdp", text("允许 UDP", "Allow UDP"))}{fields.protocol === "http" ? <>{checkField("httpAllowTransparent", text("允许透明代理", "Allow transparent proxy"))}{field("httpUserLevel", text("用户等级", "User level"), { type: "number", min: 0, step: 1 })}</> : field("proxyIp", text("本地 IP", "Local IP"), { placeholder: "127.0.0.1" })}</>}
               {fields.protocol === "wireguard" && <>{field("wireguardSecretKey", text("WireGuard 私钥", "WireGuard secret key"))}{field("wireguardAddress", text("WireGuard 地址（CIDR，逗号分隔）", "WireGuard address (CIDR, comma separated)"))}{field("wireguardMtu", "MTU", { type: "number", min: 0, max: 65535, step: 1 })}{checkField("wireguardNoKernelTun", text("禁用内核 TUN", "Disable kernel TUN"))}{areaField("wireguardPeers", text("对端（JSON 数组）", "Peers (JSON array)"), { placeholder: '[{"publicKey":"…","allowedIPs":["0.0.0.0/0"]}]' })}{areaField("wireguardNoise", text("Noise 配置（JSON）", "Noise settings (JSON)"))}</>}
-              {(fields.protocol === "vless" || fields.protocol === "trojan") && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}
+              {(fields.protocol === "vless" || fields.protocol === "trojan") && <div className="admin-form-wide inbound-fallbacks"><div className="inbound-fallbacks-head"><div><b>{text("回落", "Fallbacks")}</b><small>{text("按顺序匹配 SNI / ALPN / Path，未命中的流量转到 dest。", "Matched in order by SNI / ALPN / path; unmatched traffic goes to dest.")}</small></div><button className="outline-button small" type="button" disabled={fallbackParse.broken} onClick={appendFallback}><Plus size={13} /> {text("添加回落", "Add fallback")}</button></div>{fallbackParse.broken ? <div className="admin-form-note">{text("当前回落 JSON 无法解析，请先在下方原始 JSON 中修正。", "The current fallback JSON cannot be parsed; fix it in the raw JSON field below.")}</div> : fallbackParse.rows.length === 0 ? <div className="inbound-clients-empty">{text("还没有回落规则。", "No fallbacks yet.")}</div> : fallbackParse.rows.map((row, index) => <div className="inbound-fallback-row" key={index}><label><span>SNI</span><input value={String(row.name ?? "")} placeholder="www.example.com" onChange={(event) => patchFallback(index, { name: event.target.value })} /></label><label><span>ALPN</span><input value={String(row.alpn ?? "")} placeholder="h2" onChange={(event) => patchFallback(index, { alpn: event.target.value })} /></label><label><span>Path</span><input value={String(row.path ?? "")} placeholder="/" onChange={(event) => patchFallback(index, { path: event.target.value })} /></label><label><span>Dest</span><input value={String(row.dest ?? "")} placeholder="8080" onChange={(event) => patchFallback(index, { dest: event.target.value })} /></label><label><span>xver</span><input type="number" min={0} max={2} step={1} value={String(row.xver ?? 0)} onChange={(event) => patchFallback(index, { xver: Number(event.target.value) || 0 })} /></label><button className="quiet-icon danger" type="button" aria-label={text("删除回落", "Delete fallback")} onClick={() => removeFallback(index)}><Trash2 size={14} /></button></div>)}{fallbackParse.broken && areaField("protocolFallbacks", text("回落配置（JSON 数组）", "Fallbacks (JSON array)"), { placeholder: '[{"dest":80}]' })}</div>}
             </>)}
             </div>
 
@@ -1184,6 +1334,55 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
               {fields.network === "xhttp" && <>{field("xhttpPath", text("路径", "Path"))}{field("xhttpHost", text("Host（可选）", "Host (optional)"))}{selectField("xhttpMode", text("XHTTP 模式", "XHTTP mode"), xhttpModes.map((value): [string, string] => [value, value]))}{field("xhttpXPaddingBytes", "xPaddingBytes", { placeholder: "100-1000" })}{field("xhttpScMaxBufferedPosts", "scMaxBufferedPosts", { type: "number", min: 0, step: 1 })}{field("xhttpScMaxEachPostBytes", "scMaxEachPostBytes", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConcurrency", "xmux.maxConcurrency", { type: "number", min: 0, step: 1 })}{field("xhttpMaxConnections", "xmux.maxConnections", { type: "number", min: 0, step: 1 })}{field("xhttpCMaxReuseTimes", "xmux.cMaxReuseTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHMaxRequestTimes", "xmux.hMaxRequestTimes", { type: "number", min: 0, step: 1 })}{field("xhttpHKeepAlivePeriod", "xmux.hKeepAlivePeriod", { type: "number", min: 0, step: 1 })}{field("xhttpMaxLifetime", "xmux.maxLifetime", { type: "number", min: 0, step: 1 })}{checkField("xhttpNoGRPCHeader", "noGRPCHeader")}{areaField("xhttpHeaders", text("请求头（JSON）", "Headers (JSON)"))}</>}
               {fields.network === "kcp" && <>{field("kcpMtu", "mtu", { type: "number", min: 576, max: 1460, step: 1 })}{field("kcpTti", "tti", { type: "number", min: 10, max: 100, step: 1 })}{field("kcpUplinkCapacity", "uplinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpDownlinkCapacity", "downlinkCapacity", { type: "number", min: 0, step: 1 })}{field("kcpCwndMultiplier", "cwndMultiplier", { type: "number", min: 0, step: 0.1 })}{field("kcpMaxSendingWindow", "maxSendingWindow", { type: "number", min: 0, step: 1 })}{field("kcpReadBufferSize", "readBufferSize", { type: "number", min: 0, step: 1 })}{field("kcpWriteBufferSize", "writeBufferSize", { type: "number", min: 0, step: 1 })}{selectField("kcpHeaderType", text("伪装类型", "Header type"), kcpHeaderTypes.map((value): [string, string] => [value, value]))}{field("kcpSeed", text("种子（可选）", "Seed (optional)"))}{checkField("kcpCongestion", text("启用拥塞控制", "Enable congestion control"))}</>}
               {fields.network === "hysteria" && <>{field("hysteriaVersion", text("Hysteria 版本", "Hysteria version"), { type: "number", min: 1, max: 2, step: 1 })}{field("hysteriaAuth", text("认证字符串", "Auth string"))}{field("hysteriaUdpIdleTimeout", "udpIdleTimeout", { type: "number", min: 0, step: 1 })}{areaField("hysteriaMasquerade", text("伪装站点（JSON）", "Masquerade (JSON)"))}</>}
+              {fields.network === "xdrive" && <>{selectField("xdriveService", text("XDRIVE 服务", "XDRIVE service"), xdriveServices.map((value): [string, string] => [value, value]))}{field("xdriveRemoteFolder", text("远端目录", "Remote folder"), { placeholder: "xray-tunnel" })}{field("xdriveSecrets", text("凭据（逗号分隔；Google Drive 依次为 clientId、clientSecret、refreshToken）", "Secrets (comma separated; Google Drive takes clientId, clientSecret, refreshToken)"), { type: "password", autoComplete: "new-password" })}{fields.xdriveService !== "local" && <>{field("xdriveFront", text("前置地址", "Front address"), { placeholder: "www.googleapis.com" })}{field("xdriveFrontPort", text("前置端口", "Front port"), { type: "number", min: 1, max: 65535, step: 1 })}</>}{fields.xdriveService === "s3" && <>{field("xdriveS3Endpoint", text("S3 Endpoint", "S3 endpoint"), { placeholder: "https://s3.amazonaws.com" })}{field("xdriveS3Region", text("S3 区域", "S3 region"), { placeholder: "us-east-1" })}{field("xdriveS3Bucket", text("S3 存储桶", "S3 bucket"))}{checkField("xdriveS3PathStyle", text("使用 path-style 寻址", "Use path-style addressing"))}</>}{fields.xdriveService === "template" && areaField("xdriveTemplate", text("模板（JSON）", "Template (JSON)"))}{field("xdriveSegmentBytes", "segmentBytes", { type: "number", min: 0, step: 1, placeholder: "524288" })}{field("xdriveFlushIntervalMs", "flushIntervalMs", { type: "number", min: 0, step: 1, placeholder: "20" })}{field("xdrivePollIntervalMs", "pollIntervalMs", { type: "number", min: 0, step: 1, placeholder: "50" })}{field("xdriveMaxPollIntervalMs", "maxPollIntervalMs", { type: "number", min: 0, step: 1, placeholder: "500" })}{field("xdriveSessionTtlSeconds", "sessionTtlSeconds", { type: "number", min: 0, step: 1, placeholder: "300" })}{field("xdriveConcurrency", "concurrency", { type: "number", min: 0, step: 1, placeholder: "8" })}{field("xdriveEagerWindowMs", "eagerWindowMs", { type: "number", min: 0, step: 1, placeholder: "2000" })}{field("xdriveHoleTimeoutMs", "holeTimeoutMs", { type: "number", min: 0, step: 1, placeholder: "30000" })}{areaField("xdriveXmux", text("客户端 XMUX（JSON）", "Client XMUX (JSON)"))}</>}
+            </>)}
+            {formSection(text("传输掩码（finalmask）", "Transport masks (finalmask)"), <>
+              {maskError && <div className="admin-form-wide admin-form-note">{maskError}</div>}
+              {maskList("tcp", tcpMaskParse)}
+              {maskList("udp", udpMaskParse)}
+              {(fields.network === "hysteria" || fields.network === "xhttp") && <>
+                {selectField("quicCongestion", text("QUIC 拥塞控制", "QUIC congestion"), withDefault(quicCongestions.map((value): [string, string] => [value, value])))}
+                {selectField("quicBbrProfile", text("BBR 配置", "BBR profile"), withDefault(quicBbrProfiles.map((value): [string, string] => [value, value])))}
+                {field("quicBrutalUp", text("Brutal 上行（如 100mbps）", "Brutal upload (e.g. 100mbps)"))}
+                {field("quicBrutalDown", text("Brutal 下行", "Brutal download"))}
+                {field("quicUdpHopPorts", text("UDP hop 端口范围", "UDP hop ports"), { placeholder: "20000-50000" })}
+                {field("quicUdpHopInterval", text("UDP hop 间隔", "UDP hop interval"), { placeholder: "5-10" })}
+                {field("quicInitStreamReceiveWindow", "initStreamReceiveWindow", { type: "number", min: 0, step: 1 })}
+                {field("quicMaxStreamReceiveWindow", "maxStreamReceiveWindow", { type: "number", min: 0, step: 1 })}
+                {field("quicInitConnectionReceiveWindow", "initConnectionReceiveWindow", { type: "number", min: 0, step: 1 })}
+                {field("quicMaxConnectionReceiveWindow", "maxConnectionReceiveWindow", { type: "number", min: 0, step: 1 })}
+                {field("quicMaxIdleTimeout", "maxIdleTimeout", { type: "number", min: 4, max: 120, step: 1 })}
+                {field("quicKeepAlivePeriod", "keepAlivePeriod", { type: "number", min: 2, max: 60, step: 1 })}
+                {field("quicMaxIncomingStreams", "maxIncomingStreams", { type: "number", min: 8, step: 1 })}
+                {checkField("quicDebug", "debug")}
+                {checkField("quicBrutalDisableLossCompensation", "brutalDisableLossCompensation")}
+                {checkField("quicDisablePathMTUDiscovery", "disablePathMTUDiscovery")}
+                {checkField("quicDisableChromeParrot", "disableChromeParrot")}
+                {checkField("quicDisableGSO", "disableGSO")}
+                {checkField("quicDisableStatelessReset", "disableStatelessReset")}
+                {areaField("quicExtra", text("其余 quicParams 键（JSON，合并覆盖）", "Other quicParams keys (JSON, merged last)"))}
+              </>}
+            </>)}
+            {formSection(text("Socket 参数", "Socket options"), <>
+              {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
+              {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
+              {selectField("sockDomainStrategy", text("域名解析策略", "Domain strategy"), withDefault(domainStrategies.map((value): [string, string] => [value, value])))}
+              {field("sockDialerProxy", "dialerProxy")}
+              {field("sockInterface", text("网卡名称", "Network interface"))}
+              {field("sockMark", "mark", { type: "number", min: 0, step: 1 })}
+              {field("sockTcpKeepAliveIdle", "tcpKeepAliveIdle", { type: "number", min: 0, step: 1 })}
+              {field("sockTcpKeepAliveInterval", "tcpKeepAliveInterval", { type: "number", min: 0, step: 1 })}
+              {field("sockTcpUserTimeout", "tcpUserTimeout", { type: "number", min: 0, step: 1 })}
+              {field("sockTcpWindowClamp", "tcpWindowClamp", { type: "number", min: 0, step: 1 })}
+              {field("sockTcpMaxSeg", "tcpMaxSeg", { type: "number", min: 0, step: 1 })}
+              {field("sockHappyEyeballsTryDelayMs", "happyEyeballs.tryDelayMs", { type: "number", min: 0, step: 1 })}
+              {field("sockHappyEyeballsMaxConcurrentTry", "happyEyeballs.maxConcurrentTry", { type: "number", min: 0, step: 1 })}
+              {checkField("sockTcpFastOpen", "tcpFastOpen")}
+              {checkField("sockTcpNoDelay", "tcpNoDelay")}
+              {checkField("sockTcpMptcp", "tcpMptcp")}
+              {checkField("sockHappyEyeballsPrioritizeIPv4", "happyEyeballs.prioritizeIPv4")}
+              {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
+              {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
             </>)}
             </div>
 
@@ -1244,44 +1443,36 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
                 {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
               </>)}
               <div className="admin-form-note">{text("套餐等级的账户只会在「对套餐启用」且等级不低于最低套餐等级时获得该入站的客户端；保存后会立即为现有用户下发并重同步。", "Accounts whose plan level meets the minimum receive a client for this inbound only when it is provisioned for plans; saving provisions and resyncs existing users right away.")}</div>
-              {formSection(text("订阅与分享", "Subscription and sharing"), <>
-                {field("tag", text("标签", "Tag"), { maxLength: 64 })}
-                {field("subSortIndex", text("订阅排序", "Subscription sort index"), { type: "number", min: 0, max: 9999, step: 1 })}
-                {selectField("shareAddrStrategy", text("分享地址策略", "Share address strategy"), [["node", text("使用节点地址", "Use the node address")], ["listen", text("使用监听地址", "Use the listen address")], ["custom", text("自定义地址", "Custom address")]])}
-                {fields.shareAddrStrategy === "custom" && field("shareAddr", text("自定义分享地址", "Custom share address"), { maxLength: 255 })}
-                {checkField("excludeFromSub", text("从订阅中排除", "Exclude from subscription"))}
-                {checkField("disableFlow", text("禁用客户端 Flow", "Disable client flow"))}
-              </>)}
             </div>
 
             <div className="admin-form-tabpanel" hidden={inboundTab !== "advanced"}>
-              {formSection(text("Socket 参数", "Socket options"), <>
-                {selectField("sockTcpCongestion", "tcpcongestion", [["", text("默认", "Default")], ["bbr", "bbr"], ["cubic", "cubic"], ["reno", "reno"]])}
-                {selectField("sockTproxy", text("透明代理模式", "Transparent proxy mode"), [["off", text("关闭", "Off")], ["redirect", "redirect"], ["tproxy", "tproxy"]])}
-                {selectField("sockDomainStrategy", text("域名解析策略", "Domain strategy"), withDefault(domainStrategies.map((value): [string, string] => [value, value])))}
-                {field("sockDialerProxy", "dialerProxy")}
-                {field("sockInterface", text("网卡名称", "Network interface"))}
-                {field("sockMark", "mark", { type: "number", min: 0, step: 1 })}
-                {field("sockTcpKeepAliveIdle", "tcpKeepAliveIdle", { type: "number", min: 0, step: 1 })}
-                {field("sockTcpKeepAliveInterval", "tcpKeepAliveInterval", { type: "number", min: 0, step: 1 })}
-                {field("sockTcpUserTimeout", "tcpUserTimeout", { type: "number", min: 0, step: 1 })}
-                {field("sockTcpWindowClamp", "tcpWindowClamp", { type: "number", min: 0, step: 1 })}
-                {field("sockTcpMaxSeg", "tcpMaxSeg", { type: "number", min: 0, step: 1 })}
-                {field("sockHappyEyeballsTryDelayMs", "happyEyeballs.tryDelayMs", { type: "number", min: 0, step: 1 })}
-                {field("sockHappyEyeballsMaxConcurrentTry", "happyEyeballs.maxConcurrentTry", { type: "number", min: 0, step: 1 })}
-                {checkField("sockTcpFastOpen", "tcpFastOpen")}
-                {checkField("sockTcpNoDelay", "tcpNoDelay")}
-                {checkField("sockTcpMptcp", "tcpMptcp")}
-                {checkField("sockHappyEyeballsPrioritizeIPv4", "happyEyeballs.prioritizeIPv4")}
-                {checkField("sockHappyEyeballsInterleave", "happyEyeballs.interleave")}
-                {areaField("sockCustomSockopt", text("自定义 sockopt（JSON 数组）", "Custom sockopt (JSON array)"))}
-              </>)}
-              {formSection(text("原始配置", "Raw config"), <>
-                {areaField("settingsExtra", text("额外 settings（JSON，合并覆盖）", "Extra settings (JSON, merged last)"))}
-                {areaField("tcpMasks", text("TCP 最终掩码（JSON 数组）", "TCP masks (JSON array)"))}
-                {areaField("udpMasks", text("UDP 最终掩码（JSON 数组）", "UDP masks (JSON array)"))}
-                {areaField("baseConfig", text("原始配置（JSON，未托管键会保留）", "Raw config (JSON, unmanaged keys are kept)"), { rows: 6 })}
-              </>)}
+              <div className="inbound-subtabs" role="tablist" aria-label={text("原始 JSON 分区", "Raw JSON sections")}>
+                {(["all", "settings", "stream", "sniffing"] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={inboundAdvancedTab === key} className={inboundAdvancedTab === key ? "active" : ""} onClick={() => setInboundAdvancedTab(key)}>{key === "all" ? text("全部", "All") : key === "settings" ? text("设置", "Settings") : key === "stream" ? text("传输", "Stream") : text("嗅探", "Sniffing")}</button>)}
+              </div>
+              <div className="admin-form-note">{text("这些 JSON 原样写回面板：结构化字段优先，未托管的键会保留。", "These slices go back to the panel as-is: structured fields win and unmanaged keys are kept.")}</div>
+              <div className="admin-form-tabpanel" hidden={inboundAdvancedTab !== "all"}>
+                {formSection(text("完整配置", "Full config"), <>
+                  {areaField("baseConfig", text("整个 settings / streamSettings / sniffing（JSON）", "Whole settings / streamSettings / sniffing (JSON)"), { rows: 12 })}
+                </>)}
+              </div>
+              <div className="admin-form-tabpanel" hidden={inboundAdvancedTab !== "settings"}>
+                {formSection(text("settings 片段", "settings slice"), <>
+                  {areaField("settingsExtra", text("合并进 settings 的键（JSON）", "Keys merged into settings (JSON)"), { rows: 10, placeholder: '{ "fallbacks": [] }' })}
+                </>)}
+              </div>
+              <div className="admin-form-tabpanel" hidden={inboundAdvancedTab !== "stream"}>
+                {formSection(text("streamSettings 片段", "streamSettings slice"), <>
+                  {areaField("streamExtra", text("合并进 streamSettings 的键（JSON）", "Keys merged into streamSettings (JSON)"), { rows: 10, placeholder: '{ "sockopt": { "tcpFastOpen": true } }' })}
+                  {areaField("tcpMasks", text("TCP 掩码原始 JSON（数组）", "Raw TCP masks (JSON array)"), { rows: 5 })}
+                  {areaField("udpMasks", text("UDP 掩码原始 JSON（数组）", "Raw UDP masks (JSON array)"), { rows: 5 })}
+                  <div className="admin-form-wide admin-form-note">{text("externalProxy 由面板写入 streamSettings，本后台原样保留但不会生成；分享链接中的外部代理请直接在面板里维护。", "externalProxy is written by the panel; this dashboard preserves it untouched but never generates it. Maintain external proxies in the panel itself.")}</div>
+                </>)}
+              </div>
+              <div className="admin-form-tabpanel" hidden={inboundAdvancedTab !== "sniffing"}>
+                {formSection(text("sniffing 片段", "sniffing slice"), <>
+                  {areaField("sniffExtra", text("合并进 sniffing 的键（JSON）", "Keys merged into sniffing (JSON)"), { rows: 8, placeholder: '{ "enabled": true }' })}
+                </>)}
+              </div>
             </div>
           </div>
 
@@ -1512,6 +1703,13 @@ function InboundSyncDialog({ t, locale, nodes, initialNodeId, onClose, onImporte
 function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, onCopy }: { t: TextFn; locale: Locale; overview: UserOverviewData | null; nodes: DisplayNode[]; recentOrders: DisplayOrderRow[]; onNavigate: (page: PageKey) => void; onCopy: () => void }) {
   const usageChartData = (overview?.usage.days ?? []).map((day) => ({ day: day.usageDay.slice(5), used: day.billedBytes / 1_000_000_000 }));
   const usagePercent = overview && overview.usage.limitBytes > 0 ? Math.min(100, overview.usage.usedBytes / overview.usage.limitBytes * 100) : 0;
+  const remainingHint = !overview || overview.usage.limitBytes === 0
+    ? say(locale, "未设置流量额度", "No traffic limit")
+    : usagePercent >= 90
+      ? say(locale, "即将用尽", "Almost used up")
+      : usagePercent >= 70
+        ? say(locale, "余量不多", "Running low")
+        : t("available");
   const attendanceMessage = !overview?.capabilities.trafficMetering
     ? say(locale, "当前存储模式不支持签到。", "Check-in is unavailable with this storage mode.")
     : (overview.attendance.maxRewardBytes ?? overview.attendance.rewardBytes) <= 0
@@ -1545,27 +1743,18 @@ function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, o
         ru: `Отметьтесь сегодня · награда ${attendanceRewardLabel(overview.attendance)}`,
         fr: `Pointez aujourd'hui · récompense ${attendanceRewardLabel(overview.attendance)}`,
       });
-  const hero = heroTitle(locale, "user");
-  const checkinLabel = !overview?.capabilities.trafficMetering
-    ? say(locale, "签到不可用", "Check-in unavailable")
-    : (overview.attendance.maxRewardBytes ?? overview.attendance.rewardBytes) <= 0
-      ? say(locale, "签到未开放", "Check-in closed")
-      : overview.attendance.checkedInToday
-        ? say(locale, "今日已签到", "Checked in today")
-        : say(locale, "签到", "Check in");
   return <>
-    <div className="welcome-banner"><div className="banner-glow glow-one" /><div className="banner-glow glow-two" /><div className="banner-copy"><div className="banner-label"><Sparkles size={14} /> {say(locale, "你的网络已就绪", "YOUR NETWORK IS IN ORBIT")}</div><h2>{hero.lead}<em>{hero.accent}</em></h2><p>{say(locale, "安全、快速又稳定的连接，想去哪就去哪。", "A secure, fast and steady connection for wherever you’re headed.")}</p><div className="banner-actions"><button className="banner-button" onClick={() => onNavigate("subscription")}>{t("subscription")} <ArrowRight size={15} /></button><button className="banner-button ghost" onClick={() => onNavigate("checkin")}><Zap size={14} />{checkinLabel}</button></div></div><div className="orbit-art" aria-hidden="true"><div className="orbit orbit-a" /><div className="orbit orbit-b" /><div className="orbit orbit-c" /><div className="planet"><span /><i /><b /></div><div className="orbit-star star-a">✦</div><div className="orbit-star star-b">✧</div><div className="orbit-dot dot-a" /><div className="orbit-dot dot-b" /></div><div className="banner-foot"><span><span className="live-indicator" />{say(locale, "节点状态", "NODE STATUS")}</span><span><b>{nodes.filter((node) => node.state === "online").length} / {nodes.length}</b></span></div></div>
 
     <div className="stats-grid">
-      <StatCard icon={Gauge} label={t("remaining")} value={formatBytes(overview?.usage.remainingBytes ?? 0)} hint={t("available")} tone="mint" meter={100 - usagePercent} moreLabel={t("more")} />
-      <StatCard icon={Wallet} label={t("balance")} value={formatMoney(overview?.balanceMinor ?? 0, overview?.plan?.currency ?? "USD", locale)} hint={t("balance")} tone="violet" moreLabel={t("more")} />
-      <StatCard icon={CreditCard} label={t("planStatus")} value={overview?.plan?.name ?? t("noData")} hint={overview?.subscriptionActive ? t("active") : t("expired")} tone="blue" badge={overview ? phrase(locale, "等级 {n}", "LEVEL {n}", { n: String(overview.user.planLevel).padStart(2, "0") }) : undefined} moreLabel={t("more")} />
-      <StatCard icon={Wifi} label={t("activeNodes")} value={String(overview?.nodes.length ?? 0).padStart(2, "0")} hint={`${nodes.filter((node) => node.state === "online").length} ${t("online")}`} tone="amber" moreLabel={t("more")} />
+      <StatCard icon={Gauge} label={t("remaining")} value={formatBytes(overview?.usage.remainingBytes ?? 0)} hint={remainingHint} tone="mint" meter={overview && overview.usage.limitBytes > 0 ? 100 - usagePercent : undefined} />
+      <StatCard icon={Wallet} label={t("balance")} value={formatMoney(overview?.balanceMinor ?? 0, overview?.plan?.currency ?? "USD", locale)} hint={overview?.plan?.currency ?? "USD"} tone="violet" />
+      <StatCard icon={CreditCard} label={t("planStatus")} value={overview?.plan?.name ?? t("noData")} hint={overview?.subscriptionActive ? t("active") : t("expired")} tone="blue" badge={overview ? phrase(locale, "等级 {n}", "Level {n}", { n: overview.user.planLevel }) : undefined} />
+      <StatCard icon={Wifi} label={t("activeNodes")} value={String(overview?.nodes.length ?? 0)} hint={`${nodes.filter((node) => node.state === "online").length} ${t("online")}`} tone="amber" />
     </div>
 
     <div className="content-grid usage-grid">
       <section className="panel usage-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "流量分析", "TRAFFIC ANALYTICS")}</div><h3>{t("usageTitle")}</h3><p>{formatBytes(overview?.usage.usedBytes ?? 0)} {t("traffic")}</p></div><span className="count-chip">{t("last30")}</span></div><div className="chart-summary"><div><strong>{formatBytes(overview?.usage.usedBytes ?? 0)}</strong><small>{say(locale, "当前周期累计", "Current cycle total")}</small></div><div className="chart-legend"><span><i className="legend-primary" /> {t("traffic")}</span></div></div><div className="area-chart">{overview?.capabilities.trafficMetering && usageChartData.length > 0 ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={usageChartData} margin={{ top: 8, right: 0, left: -20, bottom: 0 }}><defs><linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity={0.22} /><stop offset="95%" stopColor="var(--accent)" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="var(--chart-grid)" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "var(--text-faint)", fontSize: 11 }} dy={12} /><YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-faint)", fontSize: 11 }} tickFormatter={(value: number) => `${value} GB`} /><Tooltip contentStyle={{ background: "var(--tooltip-bg)", border: "1px solid var(--border)", borderRadius: 12, color: "var(--text-primary)", fontSize: 12 }} /><Area type="monotone" dataKey="used" name={t("traffic")} stroke="var(--accent)" strokeWidth={2.5} fill="url(#usageFill)" activeDot={{ r: 5, strokeWidth: 3, stroke: "var(--surface)" }} /></AreaChart></ResponsiveContainer> : <div className="empty-state"><Activity size={24} /><b>{overview?.capabilities.trafficMetering ? say(locale, "暂无流量样本", "No traffic samples recorded yet.") : say(locale, "流量计量不可用", "Traffic metering is unavailable.")}</b></div>}</div></section>
-      <section className="panel plan-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "会员方案", "MEMBERSHIP")}</div><h3>{t("planStatus")}</h3></div><button className="quiet-icon" aria-label={t("more")}><MoreHorizontal size={18} /></button></div><div className="member-card"><div className="member-card-top"><div className="plan-emblem"><Sparkles size={19} /></div><span className="plan-state"><i /> {overview?.subscriptionActive ? t("active") : t("expired")}</span></div><h4>{overview?.plan?.name ?? t("planName")}</h4><p>{overview?.plan?.description ?? t("planDescription")}</p><div className="member-dates"><div><small>{say(locale, "续费日期", "RENEWS ON")}</small><b>{overview?.user.planExpiresAt ? formatDate(overview.user.planExpiresAt, locale) : "—"}</b></div><span className="date-divider" /><div><small>{say(locale, "访问等级", "ACCESS LEVEL")}</small><b>{overview ? phrase(locale, "等级 {n}", "Level {n}", { n: overview.user.planLevel }) : "—"}</b></div></div><div className="plan-progress-label"><span>{t("includedTraffic")}</span><span>{formatBytes(overview?.usage.usedBytes ?? 0)} <i>/</i> {formatBytes(overview?.usage.limitBytes ?? 0)}</span></div><div className="plan-progress"><span style={{ width: `${usagePercent}%` }} /></div><button className="plan-link" onClick={() => { void onCopy(); }}><ArrowRight size={14} />{t("copyLink")}<span>↗</span></button></div><button className="upgrade-row" onClick={() => onNavigate("plans")}><span><Sparkles size={15} /> {t("upgrade")}</span><ArrowRight size={15} /></button></section>
+      <section className="panel plan-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "会员方案", "MEMBERSHIP")}</div><h3>{t("planStatus")}</h3></div></div><div className="member-card"><div className="member-card-top"><div className="plan-emblem"><Layers size={19} /></div><span className="plan-state"><i /> {overview?.subscriptionActive ? t("active") : t("expired")}</span></div><h4>{overview?.plan?.name ?? t("noData")}</h4>{overview?.plan?.description && <p>{overview.plan.description}</p>}<div className="member-dates"><div><small>{say(locale, "续费日期", "RENEWS ON")}</small><b>{overview?.user.planExpiresAt ? formatDate(overview.user.planExpiresAt, locale) : "—"}</b></div><span className="date-divider" /><div><small>{say(locale, "访问等级", "ACCESS LEVEL")}</small><b>{overview ? phrase(locale, "等级 {n}", "Level {n}", { n: overview.user.planLevel }) : "—"}</b></div></div><div className="plan-progress-label"><span>{t("includedTraffic")}</span><span>{formatBytes(overview?.usage.usedBytes ?? 0)} <i>/</i> {formatBytes(overview?.usage.limitBytes ?? 0)}</span></div><div className="plan-progress"><span style={{ width: `${usagePercent}%` }} /></div><button className="plan-link" onClick={() => { void onCopy(); }}><ArrowRight size={14} />{t("copyLink")}<span>↗</span></button></div><button className="upgrade-row" onClick={() => onNavigate("plans")}><span><Layers size={15} /> {t("upgrade")}</span><ArrowRight size={15} /></button></section>
     </div>
 
     <div className="content-grid lower-grid"><section className="panel nodes-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "网络地图", "NETWORK MAP")}</div><h3>{t("liveNodes")}</h3><p>{pick(locale, {
@@ -1581,12 +1770,12 @@ function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, o
   ar: `${nodes.length} نقاط وصول متاحة`,
   ru: `Доступно точек доступа: ${nodes.length}`,
   fr: `${nodes.length} points d'accès disponibles`,
-})}</p></div><button className="text-link" onClick={() => onNavigate("nodes")}>{t("allNodes")} <ArrowRight size={14} /></button></div><div className="node-list">{nodes.slice(0, 3).map((node) => <NodeRow key={node.name} node={node} t={t} locale={locale} />)}</div><div className="node-panel-footer"><span><i /> {nodes.filter((node) => node.state === "online").length} / {nodes.length} {t("online")}</span><button onClick={() => onNavigate("nodes")}>{t("allNodes")} <ArrowRight size={13} /></button></div></section><section className="panel activity-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "你的空间", "YOUR SPACE")}</div><h3>{t("recent")}</h3></div><button className="quiet-icon" aria-label={t("more")}><MoreHorizontal size={18} /></button></div><div className="activity-list">{recentOrders.length ? recentOrders.slice(0, 3).map((order) => <div className="activity-item" key={order.id}><div className="activity-icon blue"><CreditCard size={14} /></div><div className="activity-copy"><b>{order.plan}</b><small>{order.method} · {order.amount}</small></div><time>{orderStatusLabel(order.state, t, locale)}</time></div>) : <div className="empty-state"><CreditCard size={24} /><b>{t("noResults")}</b></div>}</div><div className="activity-bottom"><span>{attendanceMessage}</span><button className="outline-button small" type="button" onClick={() => onNavigate("checkin")}>{t("checkin")}</button></div></section></div>
+})}</p></div><button className="text-link" onClick={() => onNavigate("nodes")}>{t("allNodes")} <ArrowRight size={14} /></button></div><div className="node-list">{nodes.slice(0, 3).map((node) => <NodeRow key={node.name} node={node} t={t} locale={locale} />)}</div><div className="node-panel-footer"><span><i /> {nodes.filter((node) => node.state === "online").length} / {nodes.length} {t("online")}</span><button onClick={() => onNavigate("nodes")}>{t("allNodes")} <ArrowRight size={13} /></button></div></section><section className="panel activity-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "你的空间", "YOUR SPACE")}</div><h3>{t("recent")}</h3></div></div><div className="activity-list">{recentOrders.length ? recentOrders.slice(0, 3).map((order) => <div className="activity-item" key={order.id}><div className="activity-icon blue"><CreditCard size={14} /></div><div className="activity-copy"><b>{order.plan}</b><small>{order.method} · {order.amount}</small></div><time>{orderStatusLabel(order.state, t, locale)}</time></div>) : <div className="empty-state"><CreditCard size={24} /><b>{t("noResults")}</b></div>}</div><div className="activity-bottom"><span>{attendanceMessage}</span><button className="outline-button small" type="button" onClick={() => onNavigate("checkin")}>{t("checkin")}</button></div></section></div>
   </>;
 }
 
-function StatCard({ icon: Icon, label, value, unit, hint, tone, meter, badge, trend, moreLabel }: { icon: LucideIcon; label: string; value: string; unit?: string; hint: string; tone: string; meter?: number; badge?: string; trend?: string; moreLabel: string }) {
-  return <article className="stat-card"><div className="stat-top"><span className={`stat-icon ${tone}`}><Icon size={17} strokeWidth={1.8} /></span>{badge ? <span className="stat-badge">{badge}</span> : <button className="quiet-icon tiny" aria-label={moreLabel}><MoreHorizontal size={17} /></button>}</div><span className="stat-label">{label}</span><div className="stat-value">{value}{unit && <span>{unit}</span>}</div><div className="stat-foot">{meter !== undefined ? <><div className="mini-meter"><span style={{ width: `${meter}%` }} /></div><span className="stat-hint">{hint}</span></> : <><span className={`hint-dot ${tone}`} />{trend === "up" && <span className="trend-up"><ArrowUpRight size={12} /></span>}<span className="stat-hint">{hint}</span></>}</div></article>;
+function StatCard({ icon: Icon, label, value, unit, hint, tone, meter, badge, trend }: { icon: LucideIcon; label: string; value: string; unit?: string; hint: string; tone: string; meter?: number; badge?: string; trend?: string }) {
+  return <article className="stat-card"><div className="stat-top"><span className={`stat-icon ${tone}`}><Icon size={17} strokeWidth={1.8} /></span>{badge && <span className="stat-badge">{badge}</span>}</div><span className="stat-label">{label}</span><div className="stat-value">{value}{unit && <span>{unit}</span>}</div><div className="stat-foot">{meter !== undefined ? <><div className="mini-meter"><span style={{ width: `${meter}%` }} /></div><span className="stat-hint">{hint}</span></> : <><span className={`hint-dot ${tone}`} />{trend === "up" && <span className="trend-up"><ArrowUpRight size={12} /></span>}<span className="stat-hint">{hint}</span></>}</div></article>;
 }
 
 function NodeRow({ node, t, locale }: { node: DisplayNode; t: TextFn; locale: Locale }) {
@@ -1594,17 +1783,18 @@ function NodeRow({ node, t, locale }: { node: DisplayNode; t: TextFn; locale: Lo
 }
 
 function AdminDashboard({ t, locale, dashboard, users, inboundCount, onNavigate }: { t: TextFn; locale: Locale; dashboard: AdminDashboardData | null; users: AdminUserRow[]; inboundCount: number; onNavigate: (page: PageKey) => void }) {
-  const hero = heroTitle(locale, "admin");
+  const nodeTotal = dashboard?.nodesTotal ?? 0;
+  const nodeOffline = nodeTotal - (dashboard?.nodesOnline ?? 0);
+  const healthPercent = nodeTotal > 0 ? Math.round((dashboard?.nodesOnline ?? 0) / nodeTotal * 100) : 0;
   return <>
-    <div className="admin-banner"><div className="admin-banner-copy"><div className="banner-label"><ShieldCheck size={14} /> {say(locale, "系统总览", "SYSTEM OVERVIEW")}</div><h2>{hero.lead}<em>{hero.accent}</em></h2><p>{say(locale, "平台运行稳定，所有接入点均已同步。", "Your platform is healthy, and every access point is in sync.")}</p></div><div className="admin-orbit"><div /><span><Network size={28} /></span></div><div className="admin-banner-foot"><span><i /> {t("statusGood")}</span><span>{t("trafficSync")}</span></div></div>
-    <div className="stats-grid admin-stats"><StatCard icon={Users} label={t("userCount")} value={String(dashboard?.users ?? 0)} hint={`${dashboard?.activeUsers ?? 0} ${t("active")}`} tone="mint" moreLabel={t("more")} /><StatCard icon={CreditCard} label={t("activeSubs")} value={String(dashboard?.activeSubscriptions ?? 0)} hint={`${dashboard?.pendingOrders ?? 0} ${t("pending")}`} tone="blue" moreLabel={t("more")} /><StatCard icon={Wallet} label={t("monthRevenue")} value={formatMoney(dashboard?.revenueMinor ?? 0, dashboard?.currency ?? "USD", locale)} hint={say(locale, "本月已支付订单", "Paid orders this month")} tone="violet" moreLabel={t("more")} /><StatCard icon={Activity} label={t("nodeHealth")} value={`${dashboard?.nodesOnline ?? 0} / ${dashboard?.nodesTotal ?? 0}`} hint={t("online")} tone="amber" moreLabel={t("more")} /></div>
-    <div className="content-grid admin-chart-grid"><section className="panel usage-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "平台分析", "PLATFORM ANALYTICS")}</div><h3>{say(locale, "平台增长", "Platform growth")}</h3><p>{say(locale, "过去 30 天的订单与注册表现", "Orders and sign-ups over the past 30 days")}</p></div><div className="segmented"><button>{say(locale, "7 天", "7 days")}</button><button className="active">{t("last30")}</button><button><SlidersHorizontal size={13} /></button></div></div><div className="chart-summary"><div><strong>{formatMoney(dashboard?.revenueMinor ?? 0, dashboard?.currency ?? "USD", locale)}</strong><small>{say(locale, "本月已支付订单", "Paid orders this month")}</small></div><div className="chart-legend"><span><i className="legend-primary" /> {t("monthRevenue")}</span><span><i className="legend-muted" /> {t("userCount")}</span></div></div><div className="area-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={[]} margin={{ top: 8, right: 0, left: -20, bottom: 0 }}><defs><linearGradient id="adminFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity={0.22} /><stop offset="95%" stopColor="var(--accent)" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="var(--chart-grid)" vertical={false} /><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "var(--text-faint)", fontSize: 11 }} dy={12} /><YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--text-faint)", fontSize: 11 }} /><Tooltip contentStyle={{ background: "var(--tooltip-bg)", border: "1px solid var(--border)", borderRadius: 12, color: "var(--text-primary)", fontSize: 12 }} /><Area type="monotone" dataKey="used" stroke="var(--accent)" strokeWidth={2.5} fill="url(#adminFill)" /></AreaChart></ResponsiveContainer></div></section><section className="panel system-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "基础设施", "INFRASTRUCTURE")}</div><h3>{say(locale, "实时状态", "Live status")}</h3></div><span className="plan-state"><i /> {say(locale, "一切正常", "ALL CLEAR")}</span></div><div className="system-hero"><div className="system-ring"><div><strong>98</strong><small>%</small></div></div><div><b>{t("nodeHealth")}</b><small>{phrase(locale, "{a}/{b} 接入点", "{a} of {b} access points", { a: dashboard?.nodesOnline ?? 0, b: dashboard?.nodesTotal ?? 0 })}</small></div></div><div className="system-metrics"><div><span>{t("storageMode")}</span><b><i className="metric-dot violet-dot" />{say(locale, "D1 · 已连接", "D1 · connected")}</b></div><div><span>{t("realtimeSync")}</span><b><i className="metric-dot mint-dot" />{phrase(locale, "{n} 秒前", "{n} sec ago", { n: 9 })}</b></div><div><span>{t("trafficSync")}</span><b><i className="metric-dot blue-dot" />{say(locale, "按计划执行", "On schedule")}</b></div></div><button className="system-link" onClick={() => onNavigate("system")}>{t("settingsTitle")} <ArrowRight size={14} /></button></section></div>
-    <div className="content-grid admin-lower"><section className="panel users-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "成员", "MEMBERS")}</div><h3>{t("users")}</h3></div><button className="text-link" onClick={() => onNavigate("users")}>{t("allNodes")} <ArrowRight size={14} /></button></div><div className="table-wrap"><table><thead><tr><th>{t("customer")}</th><th>{t("plan")}</th><th>{t("usage")}</th><th>{t("status")}</th><th /></tr></thead><tbody>{users.slice(0, 3).map((user) => <tr key={user.id}><td><div className="table-person"><span className={`avatar avatar-${user.color}`}>{user.initials}</span><span><b>{user.name}</b><small>{user.email}</small></span></div></td><td>{user.plan}</td><td><span className="usage-number">{user.usage}</span></td><td><span className={`status-chip ${user.state === "active" ? "" : "pending"}`}><i />{user.state === "active" ? t("active") : user.state === "expired" ? t("expired") : t("disabled")}</span></td><td><button className="quiet-icon tiny"><MoreHorizontal size={17} /></button></td></tr>)}</tbody></table></div></section><section className="panel quick-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "快捷入口", "SHORTCUTS")}</div><h3>{t("quickActions")}</h3></div></div><div className="quick-actions"><button onClick={() => onNavigate("users")}><span className="quick-icon mint"><Users size={17} /></span><span><b>{t("users")}</b><small>{dashboard?.users ?? 0} {say(locale, "个账号", "accounts")}</small></span><ArrowRight size={15} /></button><button onClick={() => onNavigate("inbounds")}><span className="quick-icon blue"><Globe2 size={17} /></span><span><b>{t("inbounds")}</b><small>{inboundCount} {say(locale, "个已配置", "configured")}</small></span><ArrowRight size={15} /></button><button onClick={() => onNavigate("orders")}><span className="quick-icon violet"><CreditCard size={17} /></span><span><b>{t("orders")}</b><small>{dashboard?.pendingOrders ?? 0} {t("pending")}</small></span><ArrowRight size={15} /></button></div></section></div>
+    <div className="stats-grid admin-stats"><StatCard icon={Users} label={t("userCount")} value={String(dashboard?.users ?? 0)} hint={`${dashboard?.activeUsers ?? 0} ${t("active")}`} tone="mint" /><StatCard icon={CreditCard} label={t("activeSubs")} value={String(dashboard?.activeSubscriptions ?? 0)} hint={`${dashboard?.pendingOrders ?? 0} ${t("pending")}`} tone="blue" /><StatCard icon={Wallet} label={t("monthRevenue")} value={formatMoney(dashboard?.revenueMinor ?? 0, dashboard?.currency ?? "USD", locale)} hint={say(locale, "本月已支付订单", "Paid orders this month")} tone="violet" /><StatCard icon={Activity} label={t("nodeHealth")} value={`${dashboard?.nodesOnline ?? 0} / ${dashboard?.nodesTotal ?? 0}`} hint={t("online")} tone="amber" /></div>
+    <div className="content-grid admin-chart-grid"><section className="panel usage-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "平台分析", "PLATFORM ANALYTICS")}</div><h3>{say(locale, "平台增长", "Platform growth")}</h3><p>{say(locale, "过去 30 天的订单与注册表现", "Orders and sign-ups over the past 30 days")}</p></div></div><div className="chart-summary"><div><strong>{formatMoney(dashboard?.revenueMinor ?? 0, dashboard?.currency ?? "USD", locale)}</strong><small>{say(locale, "本月已支付订单", "Paid orders this month")}</small></div></div><div className="area-chart"><div className="empty-state"><Activity size={24} /><b>{say(locale, "增长数据尚未聚合", "Growth data is not aggregated yet.")}</b></div></div></section><section className="panel system-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "基础设施", "INFRASTRUCTURE")}</div><h3>{say(locale, "实时状态", "Live status")}</h3></div><span className="plan-state"><i /> {nodeTotal === 0 ? say(locale, "未接入节点", "No nodes yet") : nodeOffline === 0 ? say(locale, "全部在线", "All online") : phrase(locale, "{n} 个离线", "{n} offline", { n: nodeOffline })}</span></div><div className="system-hero"><div className="system-ring" style={{ background: `conic-gradient(var(--accent) 0 ${healthPercent}%, var(--border) ${healthPercent}% 100%)` }}><div><strong>{nodeTotal ? healthPercent : "—"}</strong><small>%</small></div></div><div><b>{t("nodeHealth")}</b><small>{phrase(locale, "{a}/{b} 接入点", "{a} of {b} access points", { a: dashboard?.nodesOnline ?? 0, b: nodeTotal })}</small></div></div><div className="system-metrics"><div><span>{t("storageMode")}</span><b><i className="metric-dot violet-dot" />{t("d1Mode")}</b></div><div><span>{t("pending")}</span><b><i className="metric-dot mint-dot" />{dashboard?.pendingOrders ?? 0}</b></div><div><span>{t("trafficSync")}</span><b><i className="metric-dot blue-dot" />{say(locale, "已配置", "Configured")}</b></div></div><button className="system-link" onClick={() => onNavigate("system")}>{t("settingsTitle")} <ArrowRight size={14} /></button></section></div>
+    <div className="content-grid admin-lower"><section className="panel users-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "成员", "MEMBERS")}</div><h3>{t("users")}</h3></div><button className="text-link" onClick={() => onNavigate("users")}>{t("allNodes")} <ArrowRight size={14} /></button></div><div className="table-wrap"><table><thead><tr><th>{t("customer")}</th><th>{t("plan")}</th><th>{t("usage")}</th><th>{t("status")}</th></tr></thead><tbody>{users.slice(0, 3).map((user) => <tr key={user.id}><td><div className="table-person"><span className={`avatar avatar-${user.color}`}>{user.initials}</span><span><b>{user.name}</b><small>{user.email}</small></span></div></td><td>{user.plan}</td><td><span className="usage-number">{user.usage}</span></td><td><span className={`status-chip ${user.state === "active" ? "" : "pending"}`}><i />{user.state === "active" ? t("active") : user.state === "expired" ? t("expired") : t("disabled")}</span></td></tr>)}</tbody></table></div></section><section className="panel quick-panel"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "快捷入口", "SHORTCUTS")}</div><h3>{t("quickActions")}</h3></div></div><div className="quick-actions"><button onClick={() => onNavigate("users")}><span className="quick-icon mint"><Users size={17} /></span><span><b>{t("users")}</b><small>{dashboard?.users ?? 0} {say(locale, "个账号", "accounts")}</small></span><ArrowRight size={15} /></button><button onClick={() => onNavigate("inbounds")}><span className="quick-icon blue"><Globe2 size={17} /></span><span><b>{t("inbounds")}</b><small>{inboundCount} {say(locale, "个已配置", "configured")}</small></span><ArrowRight size={15} /></button><button onClick={() => onNavigate("orders")}><span className="quick-icon violet"><CreditCard size={17} /></span><span><b>{t("orders")}</b><small>{dashboard?.pendingOrders ?? 0} {t("pending")}</small></span><ArrowRight size={15} /></button></div></section></div>
   </>;
 }
 
-function PageToolbar({ t, count, action }: { t: TextFn; count: string; action?: React.ReactNode }) {
-  return <div className="table-toolbar"><div className="toolbar-left"><span className="count-chip">{count}</span></div><div className="toolbar-right">{action}<span className="filter-button"><SlidersHorizontal size={14} />{t("filtering")}</span></div></div>;
+function PageToolbar({ count, action }: { count: string; action?: React.ReactNode }) {
+  return <div className="table-toolbar"><div className="toolbar-left"><span className="count-chip">{count}</span></div><div className="toolbar-right">{action}</div></div>;
 }
 
 function NodesPage({ t, locale, rows, admin, onClearSearch, onEdit, onToggle, onTest }: { t: TextFn; locale: Locale; rows: DisplayNode[]; admin: boolean; onClearSearch: () => void; onEdit: (nodeId: string) => void; onToggle: (nodeId: string, enabled: boolean) => void; onTest: (nodeId: string) => void }) {
@@ -1615,7 +1805,7 @@ function NodesPage({ t, locale, rows, admin, onClearSearch, onEdit, onToggle, on
     ? [t("nodes"), regionLabel, inboundLabel, checkedLabel, t("status"), ""]
     : [t("nodes"), regionLabel, t("multiplier"), t("status")];
   return <div className="panel data-panel">
-    <PageToolbar t={t} count={phrase(locale, "{n} 个节点", "{n} nodes", { n: rows.length })} />
+    <PageToolbar count={phrase(locale, "{n} 个节点", "{n} nodes", { n: rows.length })} />
     <div className="table-wrap full-table node-table">
       <table>
         <thead><tr>{headers.map((header, index) => <th key={`${header}-${index}`}>{header}</th>)}</tr></thead>
@@ -1638,18 +1828,17 @@ function NodesPage({ t, locale, rows, admin, onClearSearch, onEdit, onToggle, on
         </tbody>
       </table>
     </div>
-    <div className="node-list-foot"><span><i /> {t("statusGood")}</span><span>{t("refreshSoon")}</span></div>
+    <div className="node-list-foot"><span><i /> {rows.filter((row) => row.state === "online").length} / {rows.length} {t("online")}</span><span>{t("refreshSoon")}</span></div>
   </div>;
 }
 function UsersPage({ t, locale, rows, onEdit, onPlan, onAdjust, onToggle }: { t: TextFn; locale: Locale; rows: AdminUserRow[]; onEdit: (userId: string) => void; onPlan: (userId: string) => void; onAdjust: (userId: string) => void; onToggle: (userId: string, enabled: boolean) => void }) {
   return <div className="panel data-panel">
-    <PageToolbar t={t} count={phrase(locale, "{n} 个用户", "{n} users", { n: rows.length })} />
+    <PageToolbar count={phrase(locale, "{n} 个用户", "{n} users", { n: rows.length })} />
     <div className="table-wrap full-table">
       <table>
-        <thead><tr><th className="bulk-col"><input type="checkbox" aria-label={say(locale, "全选", "Select all")} /></th><th>{t("customer")}</th><th>{t("role")}</th><th>{t("plan")}</th><th>{t("usage")}</th><th>{t("created")}</th><th>{t("status")}</th><th /></tr></thead>
+        <thead><tr><th>{t("customer")}</th><th>{t("role")}</th><th>{t("plan")}</th><th>{t("usage")}</th><th>{t("created")}</th><th>{t("status")}</th><th /></tr></thead>
         <tbody>
           {rows.map((user) => <tr key={user.id}>
-            <td className="bulk-col" data-label=""><input type="checkbox" aria-label={phrase(locale, "选择 {n}", "Select {n}", { n: user.name })} /></td>
             <td className="cell-title"><div className="table-person"><span className={`avatar avatar-${user.color}`}>{user.initials}</span><span><b>{user.name}</b><small>{user.email}</small></span></div></td>
             <td data-label={t("role")}><span className="role-chip">{user.role}</span></td>
             <td data-label={t("plan")}>{user.plan}</td>
@@ -1673,7 +1862,7 @@ function UsersPage({ t, locale, rows, onEdit, onPlan, onAdjust, onToggle }: { t:
 }
 function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn; locale: Locale; rows: DisplayInboundRow[]; onEdit: (inboundId: string) => void; onToggle: (inboundId: string, enabled: boolean) => void; onSync: () => void }) {
   return <div className="panel data-panel">
-    <PageToolbar t={t} count={phrase(locale, "{n} 个入站", "{n} inbounds", { n: rows.length })} action={<button className="outline-button small" type="button" onClick={onSync}>{say(locale, "从节点同步", "Sync from node")}</button>} />
+    <PageToolbar count={phrase(locale, "{n} 个入站", "{n} inbounds", { n: rows.length })} action={<button className="outline-button small" type="button" onClick={onSync}>{say(locale, "从节点同步", "Sync from node")}</button>} />
     <div className="table-wrap full-table">
       <table>
         <thead><tr><th>{t("inbounds")}</th><th>{t("nodes")}</th><th>{t("level")}</th><th>{t("multiplierLabel")}</th><th>{t("clientCount")}</th><th>{t("status")}</th><th /></tr></thead>
@@ -1699,7 +1888,7 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn
   </div>;
 }
 function PlansAdmin({ t, locale, plans, onEdit, onToggle, onToggleHidden }: { t: TextFn; locale: Locale; plans: DisplayPlanRow[]; onEdit: (planId: string) => void; onToggle: (planId: string, enabled: boolean) => void; onToggleHidden: (planId: string, hidden: boolean) => void }) {
-  return <div className="plans-grid">{plans.map((plan) => <article className={`plan-admin-card ${plan.tone}`} key={plan.id}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Sparkles size={17} /></span><span className="plan-admin-chips">{plan.hidden && <span className="status-chip pending"><i />{say(locale, "已隐藏", "Hidden")}</span>}<span className={`status-chip ${plan.enabled ? "" : "pending"}`}><i />{plan.enabled ? t("enabled") : t("disabled")}</span></span></div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("level")}</span><b>{plan.level}</b></div><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div><div><span>{t("users")}</span><b>{plan.users}</b></div></div><button className="outline-button wide" onClick={() => onEdit(plan.id)}>{t("edit")}</button><button className="outline-button wide" onClick={() => onToggleHidden(plan.id, !plan.hidden)}>{plan.hidden ? say(locale, "对用户显示", "Show to users") : say(locale, "对用户隐藏", "Hide from users")}</button><button className="outline-button wide" onClick={() => onToggle(plan.id, !plan.enabled)}>{plan.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></article>)}</div>;
+  return <div className="plans-grid">{plans.map((plan) => <article className={`plan-admin-card ${plan.tone}`} key={plan.id}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Layers size={17} /></span><span className="plan-admin-chips">{plan.hidden && <span className="status-chip pending"><i />{say(locale, "已隐藏", "Hidden")}</span>}<span className={`status-chip ${plan.enabled ? "" : "pending"}`}><i />{plan.enabled ? t("enabled") : t("disabled")}</span></span></div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("level")}</span><b>{plan.level}</b></div><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div><div><span>{t("users")}</span><b>{plan.users}</b></div></div><button className="outline-button wide" onClick={() => onEdit(plan.id)}>{t("edit")}</button><button className="outline-button wide" onClick={() => onToggleHidden(plan.id, !plan.hidden)}>{plan.hidden ? say(locale, "对用户显示", "Show to users") : say(locale, "对用户隐藏", "Hide from users")}</button><button className="outline-button wide" onClick={() => onToggle(plan.id, !plan.enabled)}>{plan.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button></article>)}</div>;
 }
 
 function PlansPage({ t, locale, plans, currentPlan, onCheckout }: { t: TextFn; locale: Locale; plans: ApiPlan[]; currentPlan: ApiPlan | null; onCheckout: (plan: ApiPlan) => void }) {
@@ -1714,7 +1903,7 @@ function PlansPage({ t, locale, plans, currentPlan, onCheckout }: { t: TextFn; l
     isCurrent: plan.id === currentPlan?.id,
     isDowngrade: currentPlan !== null && plan.level < currentPlan.level,
   }));
-  return <><div className="plans-intro"><div><span className="section-kicker">{say(locale, "再多一点空间", "A LITTLE MORE ROOM")}</span><h2>{t("manageTitle")} <span>{t("manageSuffix")}</span></h2><p>{t("planDescription")}</p></div><span className="plan-group-badge"><Sparkles size={14} /> {t("payment")} · Waffo</span></div><div className="plans-grid">{cardPlans.map((plan, index) => <article className={`plan-admin-card ${plan.tone} ${index === 1 ? "featured-plan" : ""}`} key={plan.name}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Sparkles size={17} /></span>{index === 1 && <span className="popular-badge">{say(locale, "最受欢迎", "MOST LOVED")}</span>}</div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("level")}</span><b>{plan.levelLabel}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div></div><button className={index === 1 ? "primary-button wide" : "outline-button wide"} disabled={plan.isDowngrade} onClick={() => onCheckout(plan)}>{plan.isDowngrade ? (say(locale, "不可降级", "Downgrade unavailable")) : plan.isCurrent ? t("renew") : t("upgrade")}</button></article>)}</div></>;
+  return <>{cardPlans.length ? <div className="plans-grid">{cardPlans.map((plan) => <article className={`plan-admin-card ${plan.tone} ${plan.isCurrent ? "featured-plan" : ""}`} key={plan.name}><div className="plan-admin-head"><span className={`plan-emblem ${plan.tone}`}><Layers size={17} /></span>{plan.isCurrent && <span className="popular-badge">{t("planStatus")}</span>}</div><h3>{plan.name}</h3><p>{plan.detail}</p><div className="plan-price"><b>{plan.price}</b><span>/ {plan.cycle.toLowerCase()}</span></div><div className="plan-admin-rows"><div><span>{t("trafficLimit")}</span><b>{plan.traffic}</b></div><div><span>{t("level")}</span><b>{plan.levelLabel}</b></div><div><span>{t("resetCycle")}</span><b>{plan.cycle}</b></div></div><button className={plan.isCurrent ? "primary-button wide" : "outline-button wide"} disabled={plan.isDowngrade} onClick={() => onCheckout(plan)}>{plan.isDowngrade ? (say(locale, "不可降级", "Downgrade unavailable")) : plan.isCurrent ? t("renew") : t("upgrade")}</button></article>)}</div> : <div className="panel empty-state"><CreditCard size={24} /><b>{say(locale, "暂无付费套餐", "No paid plans available")}</b></div>}</>;
 }
 
 function orderStatusLabel(status: string, t: TextFn, locale: Locale): string {
@@ -1725,7 +1914,7 @@ function orderStatusLabel(status: string, t: TextFn, locale: Locale): string {
 
 function OrdersPage({ t, locale, rows, onDelete, onAction }: { t: TextFn; locale: Locale; rows: DisplayOrderRow[]; onDelete: (orderId: string) => void; onAction: (label: string) => void }) {
   return <div className="panel data-panel">
-    <PageToolbar t={t} count={phrase(locale, "最近 {n} 笔订单", "{n} recent orders", { n: rows.length })} />
+    <PageToolbar count={phrase(locale, "最近 {n} 笔订单", "{n} recent orders", { n: rows.length })} />
     <div className="table-wrap full-table">
       <table>
         <thead><tr><th>{t("orderNo")}</th><th>{t("customer")}</th><th>{t("plan")}</th><th>{t("payment")}</th><th>{t("amount")}</th><th>{t("date")}</th><th>{t("status")}</th><th /></tr></thead>
@@ -1751,11 +1940,11 @@ function OrdersPage({ t, locale, rows, onDelete, onAction }: { t: TextFn; locale
   </div>;
 }
 function SubscriptionPage({ t, locale, subscription, onCopy, onReset }: { t: TextFn; locale: Locale; subscription: UserSubscriptionData | null; onCopy: () => void; onReset: (reset?: boolean) => Promise<void> }) {
-  return <div className="subscription-layout"><section className="panel subscription-hero"><div className="sub-hero-glow" /><div className="member-card-top"><div className="plan-emblem"><Sparkles size={19} /></div><span className="plan-state"><i /> {subscription?.active ? t("active") : t("expired")}</span></div><span className="section-kicker">{say(locale, "当前套餐", "YOUR CURRENT PLAN")}</span><h2>{subscription?.plan?.name ?? t("planName")}</h2><p>{subscription?.plan?.description ?? t("planDescription")}</p><div className="sub-stat-strip"><div><small>{t("level")}</small><b>{subscription?.plan ? phrase(locale, "等级 {n}", "Level {n}", { n: subscription.plan.level }) : "—"}</b></div><div><small>{t("trafficLimit")}</small><b>{formatBytes(subscription?.traffic.limitBytes ?? 0)}</b></div><div><small>{t("expiry")}</small><b>{subscription?.expiresAt ? formatDate(subscription.expiresAt, locale) : "—"}</b></div><div><small>{t("remaining")}</small><b>{formatBytes(subscription?.traffic.remainingBytes ?? 0)}</b></div></div><div className="sub-actions"><button className="primary-button" onClick={onCopy}><ArrowRight size={15} />{t("copyLink")}</button><span className="sub-hint"><ShieldCheck size={14} /> {t("statusGood")}</span></div></section><section className="panel subscription-settings"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "配置", "CONFIGURATION")}</div><h3>{t("subscriptionLink")}</h3><p>{t("copyLink")}</p></div></div><SubscriptionLinks locale={locale} links={subscription?.links} onReset={onReset} /><div className="client-list">{subscription?.clients.map((client) => <div key={`${client.inboundName}:${client.port}`}><span className="client-logo client-v">{client.protocol.slice(0, 1).toUpperCase()}</span><span><b>{client.inboundName}</b><small>{client.protocol.toUpperCase()} · {client.port} · {client.syncStatus}</small></span><span className={`status-chip ${client.enabled ? "" : "pending"}`}><i />{client.enabled ? t("enabled") : t("offline")}</span></div>)}{!subscription?.clients.length && <div className="empty-state"><Network size={20} /><b>{say(locale, "暂无可用客户端", "No connected clients are available.")}</b></div>}</div></section><section className="panel subscription-note"><span className="quick-icon amber"><CircleHelp size={16} /></span><div><b>{t("support")}</b><p>{t("refreshSoon")}</p></div><ArrowRight size={15} /></section></div>;
+  return <div className="subscription-layout"><section className="panel subscription-hero"><div className="member-card-top"><div className="plan-emblem"><Layers size={19} /></div><span className="plan-state"><i /> {subscription?.active ? t("active") : t("expired")}</span></div><span className="section-kicker">{say(locale, "当前套餐", "YOUR CURRENT PLAN")}</span>{subscription?.plan ? <h2>{subscription.plan.name}</h2> : <h2>{t("noData")}</h2>}{subscription?.plan?.description && <p>{subscription.plan.description}</p>}<div className="sub-stat-strip"><div><small>{t("level")}</small><b>{subscription?.plan ? phrase(locale, "等级 {n}", "Level {n}", { n: subscription.plan.level }) : "—"}</b></div><div><small>{t("trafficLimit")}</small><b>{formatBytes(subscription?.traffic.limitBytes ?? 0)}</b></div><div><small>{t("expiry")}</small><b>{subscription?.expiresAt ? formatDate(subscription.expiresAt, locale) : "—"}</b></div><div><small>{t("remaining")}</small><b>{formatBytes(subscription?.traffic.remainingBytes ?? 0)}</b></div></div><div className="sub-actions"><button className="primary-button" onClick={onCopy}><ArrowRight size={15} />{t("copyLink")}</button><span className="sub-hint"><ShieldCheck size={14} /> {say(locale, "链接含访问凭证，请勿分享", "The link contains access credentials; do not share it")}</span></div></section><section className="panel subscription-settings"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "配置", "CONFIGURATION")}</div><h3>{t("subscriptionLink")}</h3><p>{t("copyLink")}</p></div></div><SubscriptionLinks locale={locale} links={subscription?.links} onReset={onReset} /><div className="client-list">{subscription?.clients.map((client) => <div key={`${client.inboundName}:${client.port}`}><span className="client-logo client-v">{client.protocol.slice(0, 1).toUpperCase()}</span><span><b>{client.inboundName}</b><small>{client.protocol.toUpperCase()} · {client.port} · {client.syncStatus}</small></span><span className={`status-chip ${client.enabled ? "" : "pending"}`}><i />{client.enabled ? t("enabled") : t("offline")}</span></div>)}{!subscription?.clients.length && <div className="empty-state"><Network size={20} /><b>{say(locale, "暂无可用客户端", "No connected clients are available.")}</b></div>}</div></section><section className="panel subscription-note"><span className="quick-icon amber"><CircleHelp size={16} /></span><div><b>{t("support")}</b><p>{t("refreshSoon")}</p></div><ArrowRight size={15} /></section></div>;
 }
 
 function AccountPage({ t, locale, user, overview, rows, onNavigate }: { t: TextFn; locale: Locale; user: AuthenticatedUser; overview: UserOverviewData | null; rows: DisplayOrderRow[]; onNavigate: (page: PageKey) => void }) {
-  return <div className="account-grid"><section className="panel account-card"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "你的钱包", "YOUR WALLET")}</div><h3>{t("balance")}</h3></div><span className="quick-icon violet"><Wallet size={18} /></span></div><b className="account-balance">{overview ? formatMoney(overview.balanceMinor, overview.plan?.currency ?? "USD", locale) : "—"}</b><p>{overview?.plan?.currency ?? "—"} · {t("balance")}</p><button className="primary-button" type="button" onClick={() => onNavigate("plans")}><Sparkles size={15} />{t("plans")}</button></section><section className="panel account-card"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "账户信息", "ACCOUNT DETAILS")}</div><h3>{t("accountEmail")}</h3></div><span className="quick-icon blue"><Users size={17} /></span></div><div className="account-detail"><span className="avatar avatar-mint">{user.email.slice(0, 2).toUpperCase()}</span><div><b>{user.email}</b><small>{phrase(locale, "注册于 {n}", "Member since {n}", { n: formatDate(user.createdAt, locale) })}</small></div></div><button className="outline-button" type="button" disabled>{say(locale, "暂不支持编辑", "Editing unavailable")}</button></section><section className="panel account-history"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "账户动态", "ACCOUNT ACTIVITY")}</div><h3>{t("orders")}</h3></div><button className="text-link" type="button" onClick={() => onNavigate("orders")}>{t("orders")} <ArrowRight size={14} /></button></div>{rows.length ? rows.slice(0, 2).map((row) => <div className="history-row" key={row.id}><span className="quick-icon mint"><CreditCard size={16} /></span><div><b>{row.plan}</b><small>{row.date} · {row.method}</small></div><strong>{row.amount}</strong><span className={`status-chip ${row.state === "paid" || row.state === "refunded" ? "" : "pending"}`}><i />{orderStatusLabel(row.state, t, locale)}</span></div>) : <div className="empty-state"><CreditCard size={24} /><b>{t("noResults")}</b></div>}</section></div>;
+  return <div className="account-grid"><section className="panel account-card"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "你的钱包", "YOUR WALLET")}</div><h3>{t("balance")}</h3></div><span className="quick-icon violet"><Wallet size={18} /></span></div><b className="account-balance">{overview ? formatMoney(overview.balanceMinor, overview.plan?.currency ?? "USD", locale) : "—"}</b><p>{overview?.plan?.currency ?? "—"} · {t("balance")}</p><button className="primary-button" type="button" onClick={() => onNavigate("plans")}><Layers size={15} />{t("plans")}</button></section><section className="panel account-card"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "账户信息", "ACCOUNT DETAILS")}</div><h3>{t("accountEmail")}</h3></div><span className="quick-icon blue"><Users size={17} /></span></div><div className="account-detail"><span className="avatar avatar-mint">{user.email.slice(0, 2).toUpperCase()}</span><div><b>{user.email}</b><small>{phrase(locale, "注册于 {n}", "Member since {n}", { n: formatDate(user.createdAt, locale) })}</small></div></div><button className="outline-button" type="button" disabled>{say(locale, "暂不支持编辑", "Editing unavailable")}</button></section><section className="panel account-history"><div className="panel-heading"><div><div className="section-kicker">{say(locale, "账户动态", "ACCOUNT ACTIVITY")}</div><h3>{t("orders")}</h3></div><button className="text-link" type="button" onClick={() => onNavigate("orders")}>{t("orders")} <ArrowRight size={14} /></button></div>{rows.length ? rows.slice(0, 2).map((row) => <div className="history-row" key={row.id}><span className="quick-icon mint"><CreditCard size={16} /></span><div><b>{row.plan}</b><small>{row.date} · {row.method}</small></div><strong>{row.amount}</strong><span className={`status-chip ${row.state === "paid" || row.state === "refunded" ? "" : "pending"}`}><i />{orderStatusLabel(row.state, t, locale)}</span></div>) : <div className="empty-state"><CreditCard size={24} /><b>{t("noResults")}</b></div>}</section></div>;
 }
 
 function CheckinPage({ t, locale, attendance, available, securityConfigAvailable, turnstileRequired, turnstileSiteKey, busy, onCheckin }: { t: TextFn; locale: Locale; attendance: UserOverviewData["attendance"] | null; available: boolean; securityConfigAvailable: boolean; turnstileRequired: boolean; turnstileSiteKey: string | null; busy: boolean; onCheckin: (token?: string) => void }) {
@@ -1777,7 +1966,7 @@ function CheckinPage({ t, locale, attendance, available, securityConfigAvailable
           : checkedIn
             ? say(locale, "今日已签到，奖励已计入流量额度。", "You have checked in today; the reward is included in your traffic quota.")
             : say(locale, "完成今日签到后，奖励将计入流量额度。", "Check in today to add the reward to your traffic quota.");
-  return <div className="checkin-layout"><section className="panel checkin-hero"><span className="checkin-spark">✦</span><span className="section-kicker">{t("attendance")}</span><h2>{t("checkin")}</h2><p>{pick(locale, {
+  return <div className="checkin-layout"><section className="panel checkin-hero"><span className="section-kicker">{t("attendance")}</span><h2>{t("checkin")}</h2><p>{pick(locale, {
   zh: `今日奖励 ${attendanceRewardLabel(attendance)}，连续签到 ${attendance?.streak ?? 0} 天。`,
   en: `${attendanceRewardLabel(attendance)} reward today · ${attendance?.streak ?? 0} day streak.`,
   "zh-TW": `今日獎勵 ${attendanceRewardLabel(attendance)}，連續簽到 ${attendance?.streak ?? 0} 天。`,

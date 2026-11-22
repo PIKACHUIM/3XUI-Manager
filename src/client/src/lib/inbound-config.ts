@@ -66,7 +66,86 @@ export function stringList(value: unknown): string[] {
 
 export const inboundSniffTargets = ["http", "tls", "quic", "fakedns"] as const;
 export const inboundProtocols = ["vless", "vmess", "trojan", "shadowsocks", "dokodemo-door", "http", "socks", "mixed", "wireguard"] as const;
-export const inboundNetworks = ["tcp", "raw", "ws", "http", "httpupgrade", "grpc", "xhttp", "kcp", "hysteria"] as const;
+export const inboundNetworks = ["tcp", "raw", "ws", "http", "httpupgrade", "grpc", "xhttp", "kcp", "hysteria", "xdrive"] as const;
+export const xdriveServices = ["google-drive", "local", "template", "s3"] as const;
+export const tcpMaskTypes = ["fragment", "sudoku", "header-custom", "xmc", "filter"] as const;
+export const udpMaskTypes = ["salamander", "mkcp-legacy", "header-custom", "xdns", "xicmp", "noise", "sudoku", "realm", "udphop", "filter"] as const;
+export const quicCongestions = ["bbr", "reno", "brutal", "force-brutal"] as const;
+export const quicBbrProfiles = ["conservative", "standard", "aggressive"] as const;
+
+/** PattN's TCP fragmentation presets, mirrored from 3X-UI's finalmask presets. */
+export const tcpMaskPresets: Readonly<Record<string, Array<Record<string, unknown>>>> = Object.freeze({
+  "tlshello-0-len": [
+    { type: "fragment", settings: { packets: "tlshello", lengths: ["0", "104", "1"], delays: ["0"], maxSplit: "0" } },
+    { type: "fragment", settings: { packets: "1-1", lengths: ["114", "1"], delays: ["1"], maxSplit: "11" } },
+  ],
+  "tlshello-6-98": [
+    { type: "fragment", settings: { packets: "tlshello", lengths: ["6", "98", "1"], delays: ["0"], maxSplit: "0" } },
+    { type: "fragment", settings: { packets: "1-1", lengths: ["114", "1"], delays: ["1"], maxSplit: "11" } },
+  ],
+});
+
+export type MaskRow = { type: string; settings: string };
+
+/** Reads a mask array out of its JSON field without discarding a hand-written payload. */
+export function maskRows(value: unknown): { rows: MaskRow[]; broken: boolean } {
+  const source = typeof value === "string" ? value.trim() : "";
+  if (!source) return { rows: [], broken: false };
+  try {
+    const parsed: unknown = JSON.parse(source);
+    if (!Array.isArray(parsed)) return { rows: [], broken: true };
+    return {
+      rows: parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)).map((item) => ({
+        type: plainText(item.type),
+        settings: Object.keys(plainObject(item.settings)).length ? JSON.stringify(item.settings) : "",
+      })),
+      broken: false,
+    };
+  } catch {
+    return { rows: [], broken: true };
+  }
+}
+
+/** Serializes mask rows back to the array Xray expects under streamSettings.finalmask. */
+export function maskRowsJson(rows: MaskRow[]): { value: string; invalid: boolean } {
+  const output: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    const type = row.type.trim();
+    if (!type) continue;
+    const entry: Record<string, unknown> = { type };
+    const raw = row.settings.trim();
+    if (raw) {
+      try {
+        const settings: unknown = JSON.parse(raw);
+        if (!settings || typeof settings !== "object" || Array.isArray(settings)) return { value: "", invalid: true };
+        entry.settings = settings;
+      } catch {
+        return { value: "", invalid: true };
+      }
+    }
+    output.push(entry);
+  }
+  return { value: output.length ? JSON.stringify(output) : "", invalid: false };
+}
+
+/** The tag 3X-UI derives from an inbound's port and transports (`in-443-tcp`). */
+export function autoInboundTag(fields: InboundFieldMap): string {
+  const protocol = text(fields, "protocol").toLowerCase();
+  const port = Math.round(number(fields, "port", 0, 0, 65535));
+  if (protocol === "wireguard") return `in-${port}-udp`;
+  const network = text(fields, "network").toLowerCase();
+  let tcp = network !== "kcp" && network !== "quic";
+  let udp = !tcp;
+  if (protocol === "shadowsocks") {
+    const transports = (text(fields, "ssNetwork") || "tcp,udp").split(",").map((item) => item.trim());
+    tcp = transports.includes("tcp");
+    udp = transports.includes("udp");
+  } else if (protocol === "mixed" && flag(fields, "proxyUdp")) {
+    udp = true;
+  }
+  if (!tcp && !udp) tcp = true;
+  return `in-${port}-${tcp && udp ? "tcpudp" : tcp ? "tcp" : "udp"}`;
+}
 export const trafficResetUnits = ["never", "hourly", "daily", "weekly", "monthly"] as const;
 export const shareAddrStrategies = ["node", "listen", "custom"] as const;
 export const tlsVersions = ["1.0", "1.1", "1.2", "1.3"] as const;
@@ -122,7 +201,7 @@ function merged(fields: InboundFieldMap, key: string, target: Record<string, unk
 }
 
 const protocolFallbackKeys = new Set([
-  "clients", "fallbacks", "decryption", "method", "password", "network", "address", "port", "followRedirect",
+  "clients", "fallbacks", "decryption", "encryption", "method", "password", "network", "address", "port", "followRedirect",
   "timeout", "accounts", "allowTransparent", "userLevel", "auth", "udp", "ip", "secretKey", "mtu", "peers",
   "noise", "noKernelTun",
 ]);
@@ -138,6 +217,7 @@ function buildSettings(fields: InboundFieldMap, protocol: string, baseSettings: 
   if (protocol === "vless" || protocol === "vmess" || protocol === "trojan" || protocol === "shadowsocks") settings.clients = clients;
   if (protocol === "vless") {
     settings.decryption = text(fields, "vlessDecryption") || "none";
+    settings.encryption = text(fields, "vlessEncryption") || "none";
     const fallbacks = jsonField(fields, "protocolFallbacks", storedFallbacks);
     if (Array.isArray(fallbacks) && fallbacks.length) settings.fallbacks = fallbacks;
   }
@@ -185,8 +265,20 @@ function buildSettings(fields: InboundFieldMap, protocol: string, baseSettings: 
 
 const managedStreamKeys = new Set([
   "network", "security", "tlsSettings", "realitySettings", "tcpSettings", "rawSettings", "wsSettings", "grpcSettings",
-  "httpupgradeSettings", "httpSettings", "kcpSettings", "xhttpSettings", "hysteriaSettings", "sockopt", "tcpMasks", "udpMasks",
+  "httpupgradeSettings", "httpSettings", "kcpSettings", "xhttpSettings", "hysteriaSettings", "xdriveSettings", "sockopt", "finalmask",
+  "tcpMasks", "udpMasks",
 ]);
+
+const xdriveNumberFields: Array<[string, string]> = [
+  ["xdriveSegmentBytes", "segmentBytes"],
+  ["xdriveFlushIntervalMs", "flushIntervalMs"],
+  ["xdrivePollIntervalMs", "pollIntervalMs"],
+  ["xdriveMaxPollIntervalMs", "maxPollIntervalMs"],
+  ["xdriveSessionTtlSeconds", "sessionTtlSeconds"],
+  ["xdriveConcurrency", "concurrency"],
+  ["xdriveEagerWindowMs", "eagerWindowMs"],
+  ["xdriveHoleTimeoutMs", "holeTimeoutMs"],
+];
 
 function transportSettings(fields: InboundFieldMap, network: string): { key: string; value: Record<string, unknown> } | null {
   if (network === "tcp" || network === "raw") {
@@ -317,6 +409,34 @@ function transportSettings(fields: InboundFieldMap, network: string): { key: str
         masquerade: masquerade && typeof masquerade === "object" ? masquerade : {},
       },
     };
+  }
+  if (network === "xdrive") {
+    const service = text(fields, "xdriveService") || "google-drive";
+    const settings: Record<string, unknown> = { service, remoteFolder: text(fields, "xdriveRemoteFolder") };
+    const secrets = list(fields, "xdriveSecrets");
+    if (secrets.length) settings.secrets = secrets;
+    for (const [fieldName, settingsKey] of xdriveNumberFields) {
+      const value = Math.round(number(fields, fieldName, 0, 0));
+      if (value) settings[settingsKey] = value;
+    }
+    if (service === "template") {
+      const template = jsonObject(jsonValue(fields, "xdriveTemplate"));
+      if (Object.keys(template).length) settings.template = template;
+    }
+    if (service === "s3") {
+      const s3: Record<string, unknown> = {};
+      const endpoint = text(fields, "xdriveS3Endpoint");
+      if (endpoint) s3.endpoint = endpoint;
+      const region = text(fields, "xdriveS3Region");
+      if (region) s3.region = region;
+      const bucket = text(fields, "xdriveS3Bucket");
+      if (bucket) s3.bucket = bucket;
+      if (!flag(fields, "xdriveS3PathStyle")) s3.pathStyle = false;
+      if (Object.keys(s3).length) settings.s3 = s3;
+    }
+    const xmux = jsonObject(jsonValue(fields, "xdriveXmux"));
+    if (Object.keys(xmux).length) settings.xmux = xmux;
+    return { key: "xdriveSettings", value: settings };
   }
   return null;
 }
@@ -457,6 +577,55 @@ function buildSniffing(fields: InboundFieldMap): Record<string, unknown> {
   return sniffing;
 }
 
+const quicNumberFields: Array<[string, string]> = [
+  ["quicInitStreamReceiveWindow", "initStreamReceiveWindow"],
+  ["quicMaxStreamReceiveWindow", "maxStreamReceiveWindow"],
+  ["quicInitConnectionReceiveWindow", "initConnectionReceiveWindow"],
+  ["quicMaxConnectionReceiveWindow", "maxConnectionReceiveWindow"],
+  ["quicMaxIdleTimeout", "maxIdleTimeout"],
+  ["quicKeepAlivePeriod", "keepAlivePeriod"],
+  ["quicMaxIncomingStreams", "maxIncomingStreams"],
+];
+
+const quicFlagFields: Array<[string, string]> = [
+  ["quicDebug", "debug"],
+  ["quicBrutalDisableLossCompensation", "brutalDisableLossCompensation"],
+  ["quicDisablePathMTUDiscovery", "disablePathMTUDiscovery"],
+  ["quicDisableChromeParrot", "disableChromeParrot"],
+  ["quicDisableGSO", "disableGSO"],
+  ["quicDisableStatelessReset", "disableStatelessReset"],
+];
+
+const managedQuicKeys = new Set([
+  "congestion", "bbrProfile", "brutalUp", "brutalDown", "udpHop",
+  ...quicNumberFields.map(([, key]) => key), ...quicFlagFields.map(([, key]) => key),
+]);
+
+/** Rebuilds streamSettings.finalmask.quicParams from the structured form. */
+function buildQuicParams(fields: InboundFieldMap): Record<string, unknown> | null {
+  const settings: Record<string, unknown> = {};
+  const congestion = text(fields, "quicCongestion");
+  if (congestion) settings.congestion = congestion;
+  const bbrProfile = text(fields, "quicBbrProfile");
+  if (bbrProfile) settings.bbrProfile = bbrProfile;
+  const brutalUp = text(fields, "quicBrutalUp");
+  if (brutalUp) settings.brutalUp = brutalUp;
+  const brutalDown = text(fields, "quicBrutalDown");
+  if (brutalDown) settings.brutalDown = brutalDown;
+  const hopPorts = text(fields, "quicUdpHopPorts");
+  const hopInterval = text(fields, "quicUdpHopInterval");
+  if (hopPorts || hopInterval) settings.udpHop = { ports: hopPorts || "20000-50000", interval: hopInterval || "5-10" };
+  for (const [fieldName, settingsKey] of quicNumberFields) {
+    const value = Math.round(number(fields, fieldName, 0, 0));
+    if (value) settings[settingsKey] = value;
+  }
+  for (const [fieldName, settingsKey] of quicFlagFields) {
+    if (flag(fields, fieldName)) settings[settingsKey] = true;
+  }
+  const merged_ = merged(fields, "quicExtra", settings);
+  return Object.keys(merged_).length ? merged_ : null;
+}
+
 /** Rebuilds the 3X-UI settings/streamSettings/sniffing payload from the structured form. */
 export function buildInboundConfig(fields: InboundFieldMap): Record<string, unknown> {
   const base = jsonObject(rawText(fields, "baseConfig") || "{}");
@@ -467,21 +636,36 @@ export function buildInboundConfig(fields: InboundFieldMap): Record<string, unkn
 
   const extras = Object.fromEntries(Object.entries(baseStream).filter(([key]) => !managedStreamKeys.has(key)));
   const streamSettings: Record<string, unknown> = { ...extras, network, security };
+  if (network === "xdrive") {
+    // The Google Drive front address/port live beside xdriveSettings, not inside it.
+    delete streamSettings.address;
+    delete streamSettings.port;
+    const front = text(fields, "xdriveFront");
+    if (front) streamSettings.address = front;
+    const frontPort = Math.round(number(fields, "xdriveFrontPort", 0, 0, 65535));
+    if (frontPort) streamSettings.port = frontPort;
+  }
   const transport = transportSettings(fields, network);
   if (transport) streamSettings[transport.key] = transport.value;
   if (security === "tls") streamSettings.tlsSettings = buildTls(fields);
   if (security === "reality") streamSettings.realitySettings = buildReality(fields);
   const sockopt = buildSockopt(fields);
   if (sockopt) streamSettings.sockopt = sockopt;
-  const tcpMasks = jsonField(fields, "tcpMasks", baseStream.tcpMasks);
-  if (Array.isArray(tcpMasks) && tcpMasks.length) streamSettings.tcpMasks = tcpMasks;
-  const udpMasks = jsonField(fields, "udpMasks", baseStream.udpMasks);
-  if (Array.isArray(udpMasks) && udpMasks.length) streamSettings.udpMasks = udpMasks;
+  // Xray 26 moved transport masks to streamSettings.finalmask; keep reading the legacy keys.
+  const storedMask = plainObject(baseStream.finalmask);
+  const tcpMasks = jsonField(fields, "tcpMasks", Array.isArray(storedMask.tcp) ? storedMask.tcp : baseStream.tcpMasks);
+  const udpMasks = jsonField(fields, "udpMasks", Array.isArray(storedMask.udp) ? storedMask.udp : baseStream.udpMasks);
+  const finalmask: Record<string, unknown> = {};
+  if (Array.isArray(tcpMasks) && tcpMasks.length) finalmask.tcp = tcpMasks;
+  if (Array.isArray(udpMasks) && udpMasks.length) finalmask.udp = udpMasks;
+  const quicParams = buildQuicParams(fields);
+  if (quicParams) finalmask.quicParams = quicParams;
+  if (Object.keys(finalmask).length) streamSettings.finalmask = finalmask;
 
   return {
     settings: buildSettings(fields, protocol, plainObject(base.settings)),
-    streamSettings,
-    sniffing: buildSniffing(fields),
+    streamSettings: merged(fields, "streamExtra", streamSettings),
+    sniffing: merged(fields, "sniffExtra", buildSniffing(fields)),
   };
 }
 
@@ -498,7 +682,7 @@ export function buildInboundMeta(fields: InboundFieldMap): InboundMeta {
     expiryTime: Number.isFinite(parsedExpiry) && parsedExpiry > 0 ? Math.round(parsedExpiry) : 0,
     trafficReset: (trafficResetUnits as readonly string[]).includes(text(fields, "trafficReset")) ? text(fields, "trafficReset") : "never",
     trafficResetDay: Math.round(number(fields, "trafficResetDay", 0, 0, 31)),
-    tag: text(fields, "tag"),
+    tag: text(fields, "tag") || autoInboundTag(fields),
     shareAddrStrategy: (shareAddrStrategies as readonly string[]).includes(strategy) ? strategy : "node",
     shareAddr: text(fields, "shareAddr"),
     subSortIndex: Math.round(number(fields, "subSortIndex", 1, 0, 9999)),
@@ -538,8 +722,13 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
   const xhttpExtra = plainObject(xhttp.extra);
   const xmux = plainObject(xhttpExtra.xmux);
   const kcp = plainObject(stream.kcpSettings);
+  const finalmask = plainObject(stream.finalmask);
+  const quicParams = plainObject(finalmask.quicParams);
+  const quicHop = plainObject(quicParams.udpHop);
   const kcpHeader = plainObject(kcp.header);
   const hysteria = plainObject(stream.hysteriaSettings);
+  const xdrive = plainObject(stream.xdriveSettings);
+  const xdriveS3 = plainObject(xdrive.s3);
   const tcp = plainObject(stream.network === "raw" ? stream.rawSettings : stream.tcpSettings);
   const header = plainObject(tcp.header);
   const wsHeaders = plainObject(ws.headers);
@@ -576,6 +765,7 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
     // Protocol settings.
     clients: compactJson(settings.clients),
     vlessDecryption: plainText(settings.decryption, "none"),
+    vlessEncryption: plainText(settings.encryption, "none"),
     protocolFallbacks: compactJson(settings.fallbacks),
     protocolAccounts: compactJson(settings.accounts),
     ssMethod: plainText(settings.method, "2022-blake3-aes-128-gcm"),
@@ -655,6 +845,25 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
     hysteriaAuth: plainText(hysteria.auth),
     hysteriaUdpIdleTimeout: String(hysteria.udpIdleTimeout ?? 60),
     hysteriaMasquerade: compactJson(hysteria.masquerade),
+    xdriveService: plainText(xdrive.service, "google-drive"),
+    xdriveRemoteFolder: plainText(xdrive.remoteFolder),
+    xdriveSecrets: stringList(xdrive.secrets).join(","),
+    xdriveSegmentBytes: String(xdrive.segmentBytes ?? ""),
+    xdriveFlushIntervalMs: String(xdrive.flushIntervalMs ?? ""),
+    xdrivePollIntervalMs: String(xdrive.pollIntervalMs ?? ""),
+    xdriveMaxPollIntervalMs: String(xdrive.maxPollIntervalMs ?? ""),
+    xdriveSessionTtlSeconds: String(xdrive.sessionTtlSeconds ?? ""),
+    xdriveConcurrency: String(xdrive.concurrency ?? ""),
+    xdriveEagerWindowMs: String(xdrive.eagerWindowMs ?? ""),
+    xdriveHoleTimeoutMs: String(xdrive.holeTimeoutMs ?? ""),
+    xdriveS3Endpoint: plainText(xdriveS3.endpoint),
+    xdriveS3Region: plainText(xdriveS3.region),
+    xdriveS3Bucket: plainText(xdriveS3.bucket),
+    xdriveS3PathStyle: xdriveS3.pathStyle !== false,
+    xdriveTemplate: compactJson(xdrive.template),
+    xdriveXmux: compactJson(xdrive.xmux),
+    xdriveFront: plainText(stream.address),
+    xdriveFrontPort: stream.port === undefined ? "" : String(stream.port),
     // Security.
     tlsSni: plainText(tls.serverName),
     tlsAlpn: alpn.join(","),
@@ -711,8 +920,28 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
     sockHappyEyeballsInterleave: happyEyeballs.interleave === true,
     sockHappyEyeballsMaxConcurrentTry: String(happyEyeballs.maxConcurrentTry ?? 0),
     sockCustomSockopt: compactJson(sockopt.customSockopt),
-    tcpMasks: compactJson(stream.tcpMasks),
-    udpMasks: compactJson(stream.udpMasks),
+    tcpMasks: compactJson(Array.isArray(finalmask.tcp) ? finalmask.tcp : stream.tcpMasks),
+    udpMasks: compactJson(Array.isArray(finalmask.udp) ? finalmask.udp : stream.udpMasks),
+    quicCongestion: plainText(quicParams.congestion),
+    quicBbrProfile: plainText(quicParams.bbrProfile),
+    quicBrutalUp: plainText(quicParams.brutalUp),
+    quicBrutalDown: plainText(quicParams.brutalDown),
+    quicUdpHopPorts: plainText(quicHop.ports),
+    quicUdpHopInterval: plainText(quicHop.interval),
+    quicInitStreamReceiveWindow: String(quicParams.initStreamReceiveWindow ?? ""),
+    quicMaxStreamReceiveWindow: String(quicParams.maxStreamReceiveWindow ?? ""),
+    quicInitConnectionReceiveWindow: String(quicParams.initConnectionReceiveWindow ?? ""),
+    quicMaxConnectionReceiveWindow: String(quicParams.maxConnectionReceiveWindow ?? ""),
+    quicMaxIdleTimeout: String(quicParams.maxIdleTimeout ?? ""),
+    quicKeepAlivePeriod: String(quicParams.keepAlivePeriod ?? ""),
+    quicMaxIncomingStreams: String(quicParams.maxIncomingStreams ?? ""),
+    quicDebug: quicParams.debug === true,
+    quicBrutalDisableLossCompensation: quicParams.brutalDisableLossCompensation === true,
+    quicDisablePathMTUDiscovery: quicParams.disablePathMTUDiscovery === true,
+    quicDisableChromeParrot: quicParams.disableChromeParrot === true,
+    quicDisableGSO: quicParams.disableGSO === true,
+    quicDisableStatelessReset: quicParams.disableStatelessReset === true,
+    quicExtra: compactJson(Object.fromEntries(Object.entries(quicParams).filter(([key]) => !managedQuicKeys.has(key)))),
     // Sniffing.
     sniffEnabled: sniffing.enabled !== false,
     sniffDest: (destOverride.length ? destOverride : [...inboundSniffTargets]).join(","),

@@ -378,6 +378,17 @@ export class ThreeXuiClient {
     }
   }
 
+  /** Asks the panel to mint VLESS encryption key pairs, the same call behind 3X-UI's Generate keys button. */
+  async newVlessEnc(): Promise<Array<{ decryption: string; encryption: string; label?: string; id?: string }>> {
+    const response = await this.request<{ auths?: Array<{ decryption?: unknown; encryption?: unknown; label?: unknown; id?: unknown }> }>("/panel/api/server/getNewVlessEnc");
+    const auths = Array.isArray(response.obj?.auths) ? response.obj.auths : [];
+    const items = auths.flatMap((auth) => typeof auth?.decryption === "string" && typeof auth.encryption === "string" && auth.decryption && auth.encryption
+      ? [{ decryption: auth.decryption, encryption: auth.encryption, ...(typeof auth.label === "string" ? { label: auth.label } : {}), ...(typeof auth.id === "string" ? { id: auth.id } : {}) }]
+      : []);
+    if (!items.length) throw new Error("3X-UI returned no VLESS encryption keys.");
+    return items;
+  }
+
   async upsertClient(mapping: ClientMapping, inbound: Inbound, binding: InboundNodeBinding, user: User): Promise<void> {
     const id = mapping.clientId;
     const client: XuiClientData = {
