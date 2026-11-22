@@ -40,11 +40,21 @@ function object(value: unknown): Record<string, unknown> {
 const text = (v: unknown): string => typeof v === "string" ? v : "";
 const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 function base64(value: string): string { return btoa(Array.from(new TextEncoder().encode(value), b => String.fromCharCode(b)).join("")); }
-function address(inbound: Inbound, node: NodeRecord): string {
-  const raw = (inbound.shareAddrStrategy === "custom" ? inbound.shareAddr : inbound.shareAddrStrategy === "listen" ? inbound.listen : node.publicAddress)?.trim() ?? "";
+/** A share address must be a bare host without scheme, path or port. */
+function shareHost(value: string | undefined): string {
+  const raw = value?.trim() ?? "";
   const host = raw.replace(/^\[|\]$/g, "");
   if (!host || /[\s/@?#\\]/.test(host) || ["0.0.0.0", "::", "*"].includes(host)) return "";
   try { const parsed = new URL(`https://${host.includes(":") ? `[${host}]` : host}`); return parsed.port ? "" : host; } catch { return ""; }
+}
+/**
+ * The panel's own inbounds usually listen on every interface, so a "listen" strategy with an empty
+ * or wildcard address falls back to the node address instead of dropping the inbound from the feed.
+ */
+function address(inbound: Inbound, node: NodeRecord): string {
+  if (inbound.shareAddrStrategy === "custom") return shareHost(inbound.shareAddr);
+  if (inbound.shareAddrStrategy === "listen" && shareHost(inbound.listen)) return shareHost(inbound.listen);
+  return shareHost(node.publicAddress);
 }
 interface ProxyEntry { clash: Record<string, unknown>; uri: string; ss?: Record<string, unknown> }
 export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecord, mapping: ClientMapping, key: string): Promise<ProxyEntry | null> {
@@ -73,8 +83,17 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
     clash.uuid = secret;
     if (protocol === "vmess") { clash.alterId = 0; clash.cipher = "auto"; }
     if (protocol === "vless") {
-      params.set("encryption", "none");
-      if (text(settings.decryption) && settings.decryption !== "none") return null;
+      // VLESS encryption (ML-KEM) is negotiated with the server's decryption string; clients reuse
+      // the inbound encryption value verbatim, exactly as the panel's own share links do.
+      const decryption = text(settings.decryption);
+      if (decryption && decryption !== "none") {
+        const encryption = text(settings.encryption);
+        if (!encryption || encryption === "none") return null;
+        clash.encryption = encryption;
+        params.set("encryption", encryption);
+      } else {
+        params.set("encryption", "none");
+      }
       if (mapping.flow) {
         if (mapping.flow !== "xtls-rprx-vision" || network !== "tcp" || security === "none") return null;
         clash.flow = mapping.flow; params.set("flow", mapping.flow);

@@ -60,7 +60,32 @@ describe("subscription formats", () => {
     expect(await convertSubscriptionEntry({ ...ss, config: { settings: { method: "aes-128-gcm" } } }, node, mapping, key)).toBeNull();
     expect(await convertSubscriptionEntry({ ...inbound, network: "xhttp" }, node, mapping, key)).toBeNull();
     expect(await convertSubscriptionEntry({ ...inbound, shareAddrStrategy: "custom", shareAddr: "https://bad/path" }, node, mapping, key)).toBeNull();
-    expect(await convertSubscriptionEntry({ ...inbound, shareAddrStrategy: "listen", listen: "0.0.0.0" }, node, mapping, key)).toBeNull();
+    expect(await convertSubscriptionEntry({ ...inbound, shareAddrStrategy: "custom", shareAddr: "0.0.0.0" }, node, mapping, key)).toBeNull();
+  });
+  it("falls back to the node address when the listen strategy has no usable address", async () => {
+    const entry = await convertSubscriptionEntry({ ...inbound, shareAddrStrategy: "listen", listen: "" }, node, mapping, key);
+    expect(entry?.clash).toMatchObject({ server: "edge.example.com" });
+    const wildcard = await convertSubscriptionEntry({ ...inbound, shareAddrStrategy: "listen", listen: "0.0.0.0" }, node, mapping, key);
+    expect(wildcard?.clash).toMatchObject({ server: "edge.example.com" });
+    const custom = await convertSubscriptionEntry({ ...inbound, shareAddrStrategy: "custom", shareAddr: "203.0.113.9" }, node, mapping, key);
+    expect(custom?.clash).toMatchObject({ server: "203.0.113.9" });
+  });
+  it("keeps the VLESS ML-KEM encryption string the panel publishes", async () => {
+    const encrypted = {
+      ...inbound,
+      config: {
+        settings: { decryption: "mlkem768x25519plus.native.600s.server-key", encryption: "mlkem768x25519plus.native.0rtt.client-key" },
+        streamSettings: { security: "tls", tlsSettings: { serverName: "edge.example.com" } },
+      },
+    };
+    const entry = await convertSubscriptionEntry(encrypted, node, mapping, key);
+    expect(entry?.clash).toMatchObject({ encryption: "mlkem768x25519plus.native.0rtt.client-key" });
+    expect(entry?.uri).toContain("encryption=mlkem768x25519plus.native.0rtt.client-key");
+    const plain = await convertSubscriptionEntry(inbound, node, mapping, key);
+    expect(plain?.uri).toContain("encryption=none");
+    expect(plain?.clash.encryption).toBeUndefined();
+    const missing = { ...encrypted, config: { ...encrypted.config, settings: { decryption: "mlkem768x25519plus.native.600s.server-key" } } };
+    expect(await convertSubscriptionEntry(missing, node, mapping, key)).toBeNull();
   });
   it("filters excluded, privileged, unsynced, disabled and unbound entries", async () => {
     const { store } = await setup();
