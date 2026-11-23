@@ -651,6 +651,8 @@ admin.delete("/inbounds/:id", requireAdmin, async (c) => {
   const id = c.req.param("id") ?? "";
   const inbound = await store.get<Inbound>("inbounds", id);
   if (!inbound) return c.json({ error: "Inbound not found." }, 404);
+  const body = await parseBody(c);
+  const keepLocal = body?.keepLocal === true;
   const bindings = await listAll<InboundNodeBinding>(store, "inbound-node-bindings", `${id}:`);
   const mappings = (await listAll<ClientMapping>(store, "clients")).filter((mapping) => mapping.inboundId === id);
   const failures: Array<{ nodeId: string; message: string }> = [];
@@ -672,6 +674,15 @@ admin.delete("/inbounds/:id", requireAdmin, async (c) => {
     await store.put("inbound-sync", id, { inboundId: id, status: "partial", failures, updatedAt: now() });
     for (const mapping of mappings) { mapping.enable = false; await store.put("clients", mapping.id, mapping); }
     return c.json({ error: "Some nodes did not confirm deletion. The inbound has been disabled locally for retry.", failures }, 207);
+  }
+  // Take-down mode: the nodes lost the inbound, but the local config and its plan binding stay for a later resync.
+  if (keepLocal) {
+    inbound.enabled = false;
+    inbound.updatedAt = now();
+    await store.put("inbounds", id, inbound);
+    await store.put("inbound-sync", id, { inboundId: id, status: "detached", failures: [], updatedAt: now() });
+    for (const mapping of mappings) { mapping.enable = false; await store.put("clients", mapping.id, mapping); }
+    return c.json({ ok: true, detached: true });
   }
   for (const mapping of mappings) await store.delete("clients", mapping.id);
   for (const binding of bindings) await store.delete("inbound-node-bindings", binding.id);

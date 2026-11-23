@@ -875,6 +875,14 @@ describe("admin API local D1 integration", () => {
       const bindingsAfter = await store.list<InboundNodeBinding>("inbound-node-bindings", { prefix: `${inboundId}:` });
       expect(bindingsAfter.items.map((binding) => binding.panelInboundId)).toEqual([91]);
 
+      // Take-down mode keeps the local config and the plan binding.
+      const detached = await request(`/api/admin/inbounds/${inboundId}`, { method: "DELETE", headers, body: JSON.stringify({ keepLocal: true }) });
+      expect(detached.status).toBe(200);
+      expect(await detached.json()).toMatchObject({ detached: true });
+      expect(await store.get<Inbound>("inbounds", inboundId)).toMatchObject({ enabled: false, planIds: [planId], port: 2053 });
+      expect((await store.list<InboundNodeBinding>("inbound-node-bindings", { prefix: `${inboundId}:` })).items).toHaveLength(1);
+      expect(await store.get<Plan>("plans", planId)).toMatchObject({ name: planName });
+
       const removed = await request(`/api/admin/inbounds/${inboundId}`, { method: "DELETE", headers });
       expect(removed.status).toBe(200);
       expect(await store.get<Inbound>("inbounds", inboundId)).toBeNull();
