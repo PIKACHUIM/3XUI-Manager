@@ -395,7 +395,8 @@ export class ThreeXuiClient {
       id,
       email: mapping.email,
       enable: mapping.enable && user.enabled && user.billedBytes < user.planTrafficBytes,
-      totalGB: Math.max(0, Math.ceil(user.planTrafficBytes / 1_000_000_000)),
+      // 3X-UI keeps this legacy "totalGB" field in bytes, so the plan quota is sent as-is.
+      totalGB: Math.max(0, Math.ceil(user.planTrafficBytes)),
       expiryTime: user.planExpiresAt ? Date.parse(user.planExpiresAt) : 0,
       flow: mapping.flow,
       limitIp: 0,
