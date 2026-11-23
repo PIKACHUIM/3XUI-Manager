@@ -313,3 +313,7 @@
 .table-person small, .activity-copy small, .quick-actions small, .member-dates small { font-size: 11px; }
 .nav-section-label { font-size: 10px; }
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+
+/* Destructive confirmation button, used by the inbound delete dialog. */
+.primary-button.danger { border-color: var(--red); background: var(--red); color: #2a1013; box-shadow: 0 3px 12px rgba(240, 127, 136, .16); }
+.primary-button.danger:hover { filter: brightness(1.05); }

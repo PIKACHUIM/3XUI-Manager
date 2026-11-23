@@ -595,6 +595,57 @@ admin.patch("/inbounds/:id", requireAdmin, async (c) => {
   return c.json({ inbound: next, failures, syncStatus: failures.length ? "partial" : "synced" }, { status: failures.length ? 207 : 200 });
 });
 
+/**
+ * Re-reads the inbound from every bound node so local settings follow panel edits,
+ * recreates it on a node that lost it, then provisions the plan clients again.
+ */
+admin.post("/inbounds/:id/resync", requireAdmin, async (c) => {
+  const store = c.get("store");
+  const inbound = await store.get<Inbound>("inbounds", c.req.param("id") ?? "");
+  if (!inbound) return c.json({ error: "Inbound not found." }, 404);
+  const bindings = await listAll<InboundNodeBinding>(store, "inbound-node-bindings", `${inbound.id}:`);
+  if (!bindings.length) return c.json({ error: "This inbound is not bound to any node." }, 409);
+  const next: Inbound = { ...inbound };
+  const failures: Array<{ nodeId: string; message: string }> = [];
+  const recreated: string[] = [];
+  let refreshed = false;
+  for (const binding of bindings) {
+    const node = await store.get<NodeRecord>("nodes", binding.nodeId);
+    if (!node) { failures.push({ nodeId: binding.nodeId, message: "Node not found." }); continue; }
+    try {
+      const panel = await ThreeXuiClient.connect(c.env, node);
+      const remote = (await panel.listInbounds()).find((item) => item.id === binding.panelInboundId);
+      if (!remote) {
+        // The panel no longer has it; push the local record back so the node catches up.
+        binding.panelInboundId = await panel.addInbound(next);
+        await store.put("inbound-node-bindings", binding.id, binding);
+        recreated.push(node.id);
+        continue;
+      }
+      const stream = panelObject(remote.streamSettings);
+      // Nodes should serve the same inbound, so the first answer becomes the local baseline.
+      if (!refreshed) {
+        next.port = typeof remote.port === "number" ? remote.port : next.port;
+        next.protocol = (remote.protocol ?? next.protocol).toLowerCase();
+        next.network = typeof stream.network === "string" ? stream.network : next.network;
+        Object.assign(next, panelMeta(remote));
+        next.config = { ...inbound.config, settings: panelObject(remote.settings), streamSettings: stream, sniffing: panelObject(remote.sniffing) };
+        refreshed = true;
+      }
+    } catch (error) { failures.push({ nodeId: node.id, message: error instanceof Error ? error.message : "Resync failed." }); }
+  }
+  if (refreshed) {
+    next.updatedAt = now();
+    await store.put("inbounds", next.id, next);
+  }
+  await store.put("inbound-sync", next.id, { inboundId: next.id, status: failures.length ? "partial" : "synced", failures, updatedAt: now() });
+  if (next.planEnabled !== false) {
+    const users = await listAll<User>(store, "users");
+    for (const user of users.filter((item) => item.enabled && servesPlan(next, item))) await syncUserEntitlements(store, c.env, user.id);
+  }
+  return c.json({ inbound: next, refreshed, recreated, failures, syncStatus: failures.length ? "partial" : "synced" }, { status: failures.length ? 207 : 200 });
+});
+
 admin.delete("/inbounds/:id", requireAdmin, async (c) => {
   const store = c.get("store");
   const id = c.req.param("id") ?? "";
@@ -624,6 +675,7 @@ admin.delete("/inbounds/:id", requireAdmin, async (c) => {
   }
   for (const mapping of mappings) await store.delete("clients", mapping.id);
   for (const binding of bindings) await store.delete("inbound-node-bindings", binding.id);
+  await store.delete("inbound-sync", id);
   await store.delete("inbounds", id);
   return c.json({ ok: true });
 });

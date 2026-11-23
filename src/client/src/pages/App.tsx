@@ -430,6 +430,10 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
   const [checkinBusy, setCheckinBusy] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [syncDialog, setSyncDialog] = useState<{ nodeId?: string } | null>(null);
+  const [resyncingInbound, setResyncingInbound] = useState("");
+  const [deleteInbound, setDeleteInbound] = useState<AdminInboundRecord | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const t = useText(locale);
   const canAdmin = sessionUser.role === "admin";
   const chooseTheme = (next: Theme) => {
@@ -761,6 +765,40 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
       setApiError(error instanceof Error ? error.message : "The admin update failed.");
     }
   };
+  const resyncAdminInbound = async (inboundId: string) => {
+    setResyncingInbound(inboundId);
+    try {
+      const result = await apiRequest<{ refreshed: boolean; recreated: string[]; failures: Array<{ nodeId: string; message: string }> }>(`/api/admin/inbounds/${encodeURIComponent(inboundId)}/resync`, { method: "POST" });
+      setRefreshToken((value) => value + 1);
+      const rebuilt = result.recreated.length ? say(locale, `，重建 ${result.recreated.length} 个节点`, `, rebuilt ${result.recreated.length}`) : "";
+      if (result.failures.length) flash(say(locale, `${result.failures.length} 个节点同步失败${rebuilt}`, `${result.failures.length} node(s) failed${rebuilt}`));
+      else flash(say(locale, `已重新同步${rebuilt}`, `Resynced${rebuilt}`));
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : say(locale, "重新同步失败。", "The resync failed."));
+    } finally {
+      setResyncingInbound("");
+    }
+  };
+  const confirmDeleteInbound = async () => {
+    if (!deleteInbound) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      const result = await apiRequest<{ failures?: Array<{ nodeId: string; message: string }> }>(`/api/admin/inbounds/${encodeURIComponent(deleteInbound.id)}`, { method: "DELETE" });
+      setRefreshToken((value) => value + 1);
+      if (result.failures?.length) {
+        setApiError(say(locale, `删除未完成：${result.failures.length} 个节点拒绝删除，入站已在本地停用以待重试。`, `Delete incomplete: ${result.failures.length} node(s) refused, the inbound is disabled locally for a retry.`));
+        setDeleteInbound(null);
+      } else {
+        flash(say(locale, "入站已删除，套餐与其他入站未受影响", "Inbound deleted; plans and other inbounds are untouched"));
+        setDeleteInbound(null);
+      }
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : say(locale, "删除失败。", "The delete failed."));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
   const testAdminNode = async (nodeId: string) => {
     try {
       const result = await apiRequest<{ probe: { status: string } }>(`/api/admin/nodes/${encodeURIComponent(nodeId)}/test`, { method: "POST" });
@@ -855,7 +893,8 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
           {page === "overview" && (admin ? <AdminDashboard t={t} locale={locale} dashboard={adminDashboard} users={filteredUsers} inboundCount={adminInbounds.length} onNavigate={setPage} /> : overview ? <UserDashboard t={t} locale={locale} overview={overview} nodes={userDisplayNodes} recentOrders={orderDisplayRows} onNavigate={setPage} onCopy={copyLink} /> : null)}
           {page === "nodes" && <NodesPage t={t} locale={locale} rows={visibleNodes} admin={admin} onClearSearch={() => setSearch("")} onEdit={(id) => setEditor({ kind: "node", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/nodes/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} onTest={(id) => { void testAdminNode(id); }} />}
           {page === "users" && <UsersPage t={t} locale={locale} rows={filteredUsers} onEdit={(id) => setEditor({ kind: "user", id })} onPlan={(id) => setPlanUser(adminUsers.find((user) => user.id === id) ?? null)} onAdjust={(id) => setAdjustUser(adminUsers.find((user) => user.id === id) ?? null)} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/users/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
-          {page === "inbounds" && <InboundsPage t={t} locale={locale} rows={inboundRows} onSync={() => setSyncDialog({})} onEdit={(id) => setEditor({ kind: "inbound", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/inbounds/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
+          {page === "inbounds" && <InboundsPage t={t} locale={locale} rows={inboundRows} onSync={() => setSyncDialog({})} onEdit={(id) => setEditor({ kind: "inbound", id })} resyncing={resyncingInbound} onResync={(id) => { void resyncAdminInbound(id); }} onDelete={(id) => { setDeleteError(""); setDeleteInbound(adminInbounds.find((item) => item.id === id) ?? null); }} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/inbounds/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} />}
+          {deleteInbound && <DeleteInboundDialog locale={locale} inbound={deleteInbound} nodes={adminBindings.filter((binding) => binding.inboundId === deleteInbound.id).length} plans={(deleteInbound.planIds ?? []).map((planId) => adminPlans.find((plan) => plan.id === planId)?.name ?? planId)} busy={deleteBusy} error={deleteError} onCancel={() => { if (!deleteBusy) setDeleteInbound(null); }} onConfirm={() => { void confirmDeleteInbound(); }} />}
           {page === "plans" && (admin ? <PlansAdmin t={t} locale={locale} plans={planRows} onEdit={(id) => setEditor({ kind: "plan", id })} onToggle={(id, enabled) => { void mutateAdmin(`/api/admin/plans/${encodeURIComponent(id)}`, "PATCH", { enabled }); }} onToggleHidden={(id, hidden) => { void mutateAdmin(`/api/admin/plans/${encodeURIComponent(id)}`, "PATCH", { hidden }); }} /> : <PlansPage t={t} locale={locale} plans={userPlans} currentPlan={overview?.plan ?? null} onCheckout={startPlanCheckout} />)}
           {page === "orders" && <OrdersPage t={t} locale={locale} rows={orderDisplayRows} onDelete={(id) => { void mutateAdmin(`/api/admin/orders/${encodeURIComponent(id)}`, "DELETE"); }} onAction={(label) => flash(label)} />}
           {page === "help" && <HelpPage locale={locale} onSubscription={() => { setAdmin(false); setPage("subscription"); }} onPlans={() => { setAdmin(false); setPage("plans"); }} />}
@@ -1871,7 +1910,7 @@ function UsersPage({ t, locale, rows, onEdit, onPlan, onAdjust, onToggle }: { t:
     </div>
   </div>;
 }
-function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn; locale: Locale; rows: DisplayInboundRow[]; onEdit: (inboundId: string) => void; onToggle: (inboundId: string, enabled: boolean) => void; onSync: () => void }) {
+function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync, onResync, onDelete, resyncing }: { t: TextFn; locale: Locale; rows: DisplayInboundRow[]; onEdit: (inboundId: string) => void; onToggle: (inboundId: string, enabled: boolean) => void; onSync: () => void; onResync: (inboundId: string) => void; onDelete: (inboundId: string) => void; resyncing: string }) {
   return <div className="panel data-panel">
     <PageToolbar count={phrase(locale, "{n} 个入站", "{n} inbounds", { n: rows.length })} action={<button className="outline-button small" type="button" onClick={onSync}>{say(locale, "从节点同步", "Sync from node")}</button>} />
     <div className="table-wrap full-table">
@@ -1887,8 +1926,10 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn
             <td data-label={t("status")}><span className={`status-chip ${row.enabled ? "" : "pending"}`}><i />{row.enabled ? t("enabled") : t("disabled")}</span></td>
             <td className="cell-actions" data-label="">
               <div className="row-actions">
+                <button className="outline-button small" disabled={resyncing === row.id} onClick={() => onResync(row.id)}>{resyncing === row.id ? say(locale, "同步中…", "Syncing…") : say(locale, "重新同步", "Resync")}</button>
                 <button className="outline-button small" onClick={() => onEdit(row.id)}>{t("edit")}</button>
                 <button className="outline-button small" onClick={() => onToggle(row.id, !row.enabled)}>{row.enabled ? say(locale, "停用", "Disable") : say(locale, "启用", "Enable")}</button>
+                <button className="quiet-icon danger" title={say(locale, "删除", "Delete")} aria-label={say(locale, "删除", "Delete")} onClick={() => onDelete(row.id)}><Trash2 size={14} /></button>
               </div>
             </td>
           </tr>)}
@@ -1896,6 +1937,29 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync }: { t: TextFn
       </table>
       {!rows.length && <div className="empty-state"><Network size={24} /><b>{t("noResults")}</b></div>}
     </div>
+  </div>;
+}
+/** Confirms deleting an inbound and spells out that plans are left alone. */
+function DeleteInboundDialog({ locale, inbound, nodes, plans, busy, error, onCancel, onConfirm }: { locale: Locale; inbound: { name: string }; nodes: number; plans: string[]; busy: boolean; error: string; onCancel: () => void; onConfirm: () => void }) {
+  const text = (zh: string, en: string) => say(locale, zh, en);
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <section className="panel admin-create-panel is-compact" role="dialog" aria-modal="true" aria-labelledby="delete-inbound-title">
+      <div className="admin-create-form">
+        <div className="admin-create-heading">
+          <div><div className="section-kicker">{text("管理操作", "ADMIN ACTION")}</div><h2 id="delete-inbound-title">{text("删除入站", "Delete inbound")}</h2></div>
+          <button className="quiet-icon" type="button" aria-label={text("关闭", "Close")} onClick={onCancel}><X size={17} /></button>
+        </div>
+        <div className="admin-form-note">{phrase(locale, "将删除 {n} 个节点上的「{name}」及其客户端，并移除本地记录与客户端映射。", "Removes 「{name}」 and its clients from {n} node(s), then deletes the local record and mappings.", { n: nodes, name: inbound.name })}</div>
+        <div className="admin-form-note">{plans.length
+          ? phrase(locale, "该入站与套餐 {plans} 的绑定会随之移除；套餐本身不会被删除，也不会影响其他入站。", "Its binding to {plans} goes away with it; the plans themselves and every other inbound stay as they are.", { plans: plans.join(", ") })
+          : text("套餐记录不会被删除，也不会影响其他入站。", "No plan is deleted and no other inbound is touched.")}</div>
+        {error && <div className="auth-message error" role="alert">{error}</div>}
+        <div className="admin-form-actions">
+          <button className="outline-button" type="button" disabled={busy} onClick={onCancel}>{text("取消", "Cancel")}</button>
+          <button className="primary-button danger" type="button" disabled={busy} onClick={onConfirm}>{busy ? text("正在删除…", "Deleting…") : text("删除", "Delete")}</button>
+        </div>
+      </div>
+    </section>
   </div>;
 }
 function PlansAdmin({ t, locale, plans, onEdit, onToggle, onToggleHidden }: { t: TextFn; locale: Locale; plans: DisplayPlanRow[]; onEdit: (planId: string) => void; onToggle: (planId: string, enabled: boolean) => void; onToggleHidden: (planId: string, hidden: boolean) => void }) {

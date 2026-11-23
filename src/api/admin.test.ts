@@ -19,7 +19,7 @@ afterEach(async () => {
   for (const key of Object.values(businessSettingNames)) await store.delete("settings", key);
 });
 import { fileURLToPath } from "node:url";
-import type { Inbound, Order, Plan, User } from "../domain/types";
+import type { Inbound, InboundNodeBinding, Order, Plan, User } from "../domain/types";
 import type { RuntimeEnv } from "../env";
 import { createCheckout, expirePendingOrders, settleFailedOrder, settlePaidOrder } from "../services/billing";
 import { runLifecycleMaintenance } from "../services/lifecycle";
@@ -800,6 +800,98 @@ describe("admin API local D1 integration", () => {
       }
       const nodes = await store.list<{ id: string; name: string }>("nodes");
       for (const node of nodes.items.filter((item) => item.name === nodeName)) await store.delete("nodes", node.id);
+    }
+  });
+
+  it("resyncs an inbound from the panel, rebuilds a lost one and leaves plans alone on delete", async () => {
+    const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    const nodeName = `Resync node ${crypto.randomUUID()}`;
+    const inboundName = `Resync inbound ${crypto.randomUUID()}`;
+    const planName = `Resync plan ${crypto.randomUUID()}`;
+    const remote = {
+      id: 90, remark: inboundName, protocol: "vless", port: 2053, enable: true,
+      settings: JSON.stringify({ clients: [], decryption: "none", fallbacks: [] }),
+      streamSettings: JSON.stringify({ network: "ws", security: "tls", wsSettings: { path: "/resync" } }),
+      sniffing: JSON.stringify({ enabled: true }),
+    };
+    let remoteList: Array<Record<string, unknown>> = [remote];
+    let nextPanelId = 90;
+    const panel = {
+      listInbounds: vi.fn(async () => remoteList),
+      supportsClientApi: vi.fn(async () => true),
+      addInbound: vi.fn(async () => nextPanelId++),
+      updateInbound: vi.fn(async () => undefined),
+      deleteInbound: vi.fn(async () => undefined),
+      deleteClient: vi.fn(async () => undefined),
+    };
+    const connect = vi.spyOn(ThreeXuiClient, "connect").mockResolvedValue(panel as unknown as ThreeXuiClient);
+    let planId = "";
+
+    try {
+      const planResponse = await request("/api/admin/plans", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          name: planName, description: "", level: 6, trafficBytes: 1_000_000_000, validityDays: 30, priceMinor: 700,
+          currency: "USD", resetUnit: "month", resetInterval: 1, resetAtHour: 0, resetWeekday: 1, resetMonthDay: 1, allowPaidUpgrade: false, enabled: true,
+        }),
+      });
+      expect(planResponse.status).toBe(201);
+      planId = ((await planResponse.json()) as { plan: { id: string } }).plan.id;
+
+      const nodeResponse = await request("/api/admin/nodes", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          name: nodeName, region: "local", panelUrl: "https://panel.example.test", publicAddress: "node.example.test",
+          username: "local-user", password: "local-panel-password", basePath: "/", enabled: true,
+        }),
+      });
+      expect(nodeResponse.status).toBe(201);
+      const nodeId = ((await nodeResponse.json()) as { node: { id: string } }).node.id;
+
+      const created = await request("/api/admin/inbounds", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          name: inboundName, protocol: "vless", network: "tcp", port: 443, nodeIds: [nodeId], planIds: [planId],
+          config: { settings: { clients: [], decryption: "none" }, streamSettings: { network: "tcp", security: "none" } },
+        }),
+      });
+      expect(created.status).toBe(201);
+      const inboundId = ((await created.json()) as { inbound: { id: string } }).inbound.id;
+
+      // The panel now serves a different port and transport than the local copy.
+      const resync = await request(`/api/admin/inbounds/${inboundId}/resync`, { method: "POST", headers });
+      expect(resync.status).toBe(200);
+      const resynced = await resync.json() as { inbound: Inbound; refreshed: boolean; recreated: string[]; failures: unknown[] };
+      expect(resynced.refreshed).toBe(true);
+      expect(resynced.recreated).toEqual([]);
+      expect(resynced.inbound).toMatchObject({ name: inboundName, port: 2053, network: "ws", planIds: [planId] });
+      expect(resynced.inbound.config).toMatchObject({ streamSettings: { network: "ws", wsSettings: { path: "/resync" } } });
+
+      // A node that lost the inbound gets it pushed back under a new panel id.
+      remoteList = [];
+      const rebuilt = await (await request(`/api/admin/inbounds/${inboundId}/resync`, { method: "POST", headers })).json() as { recreated: string[] };
+      expect(rebuilt.recreated).toEqual([nodeId]);
+      const bindingsAfter = await store.list<InboundNodeBinding>("inbound-node-bindings", { prefix: `${inboundId}:` });
+      expect(bindingsAfter.items.map((binding) => binding.panelInboundId)).toEqual([91]);
+
+      const removed = await request(`/api/admin/inbounds/${inboundId}`, { method: "DELETE", headers });
+      expect(removed.status).toBe(200);
+      expect(await store.get<Inbound>("inbounds", inboundId)).toBeNull();
+      expect((await store.list<InboundNodeBinding>("inbound-node-bindings", { prefix: `${inboundId}:` })).items).toEqual([]);
+      expect(panel.deleteInbound).toHaveBeenCalledWith(91);
+      expect(await store.get<Plan>("plans", planId)).toMatchObject({ name: planName });
+    } finally {
+      connect.mockRestore();
+      const inbounds = await store.list<{ id: string; name: string }>("inbounds");
+      for (const inbound of inbounds.items.filter((item) => item.name === inboundName)) {
+        for (const client of (await store.list<{ id: string; inboundId: string }>("clients")).items.filter((item) => item.inboundId === inbound.id)) await store.delete("clients", client.id);
+        for (const binding of (await store.list<{ id: string; inboundId: string }>("inbound-node-bindings")).items.filter((item) => item.inboundId === inbound.id)) await store.delete("inbound-node-bindings", binding.id);
+        await store.delete("inbound-sync", inbound.id);
+        await store.delete("inbounds", inbound.id);
+      }
+      for (const node of (await store.list<{ id: string; name: string }>("nodes")).items.filter((item) => item.name === nodeName)) await store.delete("nodes", node.id);
+      if (planId) await store.delete("plans", planId);
     }
   });
 
