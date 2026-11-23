@@ -391,33 +391,41 @@ export class ThreeXuiClient {
 
   async upsertClient(mapping: ClientMapping, inbound: Inbound, binding: InboundNodeBinding, user: User): Promise<void> {
     const id = mapping.clientId;
-    const client: XuiClientData = {
-      id,
+    const enable = mapping.enable && user.enabled && user.billedBytes < user.planTrafficBytes;
+    // 3X-UI keeps this legacy "totalGB" field in bytes, so the plan quota is sent as-is.
+    const quota = {
       email: mapping.email,
-      enable: mapping.enable && user.enabled && user.billedBytes < user.planTrafficBytes,
-      // 3X-UI keeps this legacy "totalGB" field in bytes, so the plan quota is sent as-is.
+      enable,
       totalGB: Math.max(0, Math.ceil(user.planTrafficBytes)),
       expiryTime: user.planExpiresAt ? Date.parse(user.planExpiresAt) : 0,
-      flow: mapping.flow,
       limitIp: 0,
-      subId: id.replaceAll("-", "").slice(0, 16),
       reset: 0,
     };
+    // The panel only exposes the client as a path parameter; `?email=` answers 404 and used to
+    // leave every existing client on its creation-time quota.
+    try {
+      await this.request(`/panel/api/clients/update/${encodeURIComponent(mapping.email)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...quota, flow: mapping.flow }),
+      });
+      return;
+    } catch (error) {
+      if (!(error instanceof Error) || !/(record not found|not found)/i.test(error.message)) throw error;
+    }
+    const client: XuiClientData = { id, ...quota, flow: mapping.flow, subId: id.replaceAll("-", "").slice(0, 16) };
     if (inbound.protocol.toLowerCase() === "trojan" && mapping.encryptedSecret && this.env.APP_ENCRYPTION_KEY) {
       client.password = await decryptSecret(mapping.encryptedSecret, this.env.APP_ENCRYPTION_KEY);
     }
-    const body = JSON.stringify({ client, inboundIds: [binding.panelInboundId] });
-    const added = await this.tryRequest("/panel/api/clients/add", { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    if (added) return;
-    await this.request(`/panel/api/clients/update?email=${encodeURIComponent(mapping.email)}`, {
+    await this.request("/panel/api/clients/add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...client, inboundIds: [binding.panelInboundId] }),
+      body: JSON.stringify({ client, inboundIds: [binding.panelInboundId] }),
     });
   }
 
   async disableClient(mapping: ClientMapping): Promise<void> {
-    await this.request(`/panel/api/clients/update?email=${encodeURIComponent(mapping.email)}`, {
+    await this.request(`/panel/api/clients/update/${encodeURIComponent(mapping.email)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: mapping.email, enable: false }),
@@ -428,15 +436,6 @@ export class ThreeXuiClient {
     await this.request(`/panel/api/clients/del/${encodeURIComponent(mapping.email)}?keepTraffic=1`, { method: "POST" });
   }
 
-  private async tryRequest(path: string, init: RequestInit): Promise<boolean> {
-    try {
-      await this.request(path, init);
-      return true;
-    } catch (error) {
-      if (error instanceof Error && /(exists|already|duplicate)/i.test(error.message)) return false;
-      throw error;
-    }
-  }
 }
 
 export async function probeNode(env: RuntimeEnv, node: NodeRecord): Promise<{ status: "online" | "offline"; inbounds: number; clientApi: boolean; checkedAt: string; error?: string }> {

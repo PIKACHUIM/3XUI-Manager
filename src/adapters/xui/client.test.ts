@@ -264,41 +264,70 @@ describe("probeNode", () => {
   });
 });
 
-describe("upsertClient", () => {
-  it("sends the plan quota in bytes because 3X-UI stores totalGB as bytes", async () => {
-    const calls: Call[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const call = capture(input, init, calls);
-      if (call.url.endsWith("/csrf-token")) return json({ success: true, obj: "csrf" }, { cookie: "3x-ui=s; Path=/" });
-      if (call.url.endsWith("/login")) return json({ success: true }, { cookie: "3x-ui=s; Path=/" });
-      return json({ success: true, obj: {} });
-    }));
+const mappingFixture = {
+  id: "map-1", userId: "user-1", inboundId: "in-1", email: "u_user-1_in-1", clientId: "11111111-1111-4111-8111-111111111111",
+  encryptedSecret: null, flow: "", enable: true, syncStatus: "pending" as const, syncError: null, syncedNodes: [],
+  createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+};
+const inboundFixture = {
+  id: "in-1", name: "Tokyo", protocol: "vless", network: "ws", port: 443, minimumLevel: 0, multiplier: 1, enabled: true,
+  config: {}, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+};
+const bindingFixture = { id: "in-1:node-1", inboundId: "in-1", nodeId: "node-1", panelInboundId: 7, createdAt: "2026-01-01T00:00:00.000Z" };
+const userFixture = {
+  id: "user-1", email: "u@example.test", passwordHash: "", emailVerifiedAt: null, role: "user" as const, balanceMinor: 0,
+  planId: "plan-1", planLevel: 1, planExpiresAt: null, planTrafficBytes: 102_400_000_000_000, billedBytes: 0,
+  planStartedAt: "2026-01-01T00:00:00.000Z", trafficResetAt: null, enabled: true, inviteCode: null, invitedBy: null,
+  inviteCount: 0, checkinStreak: 0, lastCheckinAt: null, lastActiveAt: null,
+  createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+};
 
+function stubPanel(handler: (call: Call) => Response | null): Call[] {
+  const calls: Call[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const call = capture(input, init, calls);
+    if (call.url.endsWith("/csrf-token")) return json({ success: true, obj: "csrf" }, { cookie: "3x-ui=s; Path=/" });
+    if (call.url.endsWith("/login")) return json({ success: true }, { cookie: "3x-ui=s; Path=/" });
+    return handler(call) ?? json({ success: true, msg: "ok" });
+  }));
+  return calls;
+}
+
+describe("upsertClient", () => {
+  it("updates an existing client through the path route with the quota in bytes", async () => {
+    const calls = stubPanel(() => null);
     const client = await ThreeXuiClient.connect(env, await makeNode());
-    await client.upsertClient(
-      {
-        id: "map-1", userId: "user-1", inboundId: "in-1", email: "u_user-1_in-1", clientId: "11111111-1111-4111-8111-111111111111",
-        encryptedSecret: null, flow: "", enable: true, syncStatus: "pending", syncError: null, syncedNodes: [],
-        createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-      {
-        id: "in-1", name: "Tokyo", protocol: "vless", network: "ws", port: 443, minimumLevel: 0, multiplier: 1, enabled: true,
-        config: {}, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-      { id: "in-1:node-1", inboundId: "in-1", nodeId: "node-1", panelInboundId: 7, createdAt: "2026-01-01T00:00:00.000Z" },
-      {
-        id: "user-1", email: "u@example.test", passwordHash: "", emailVerifiedAt: null, role: "user", balanceMinor: 0,
-        planId: "plan-1", planLevel: 1, planExpiresAt: null, planTrafficBytes: 102_400_000_000_000, billedBytes: 0,
-        planStartedAt: "2026-01-01T00:00:00.000Z", trafficResetAt: null, enabled: true, inviteCode: null, invitedBy: null,
-        inviteCount: 0, checkinStreak: 0, lastCheckinAt: null, lastActiveAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    );
+    await client.upsertClient(mappingFixture, inboundFixture, bindingFixture, userFixture);
+
+    const update = calls.find((call) => call.url.includes("/panel/api/clients/update/"))!;
+    expect(update.url).toBe("https://panel.example.test:2053/panel/api/clients/update/u_user-1_in-1");
+    expect(JSON.parse(update.body!)).toMatchObject({ email: "u_user-1_in-1", totalGB: 102_400_000_000_000, enable: true, flow: "" });
+    expect(calls.some((call) => call.url.endsWith("/panel/api/clients/add"))).toBe(false);
+  });
+
+  it("creates the client when the panel answers record not found", async () => {
+    const calls = stubPanel((call) => call.url.includes("/panel/api/clients/update/")
+      ? json({ success: false, msg: "Something went wrong (record not found)" })
+      : null);
+    const client = await ThreeXuiClient.connect(env, await makeNode());
+    await client.upsertClient(mappingFixture, inboundFixture, bindingFixture, userFixture);
 
     const add = calls.find((call) => call.url.endsWith("/panel/api/clients/add"))!;
     expect(JSON.parse(add.body!)).toMatchObject({
       client: { email: "u_user-1_in-1", totalGB: 102_400_000_000_000, enable: true },
       inboundIds: [7],
     });
+  });
+});
+
+describe("disableClient", () => {
+  it("disables through the path route so the panel applies it", async () => {
+    const calls = stubPanel(() => null);
+    const client = await ThreeXuiClient.connect(env, await makeNode());
+    await client.disableClient(mappingFixture);
+
+    const update = calls.find((call) => call.url.includes("/panel/api/clients/update/"))!;
+    expect(update.url).toBe("https://panel.example.test:2053/panel/api/clients/update/u_user-1_in-1");
+    expect(JSON.parse(update.body!)).toEqual({ email: "u_user-1_in-1", enable: false });
   });
 });

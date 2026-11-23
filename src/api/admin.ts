@@ -639,11 +639,23 @@ admin.post("/inbounds/:id/resync", requireAdmin, async (c) => {
     await store.put("inbounds", next.id, next);
   }
   await store.put("inbound-sync", next.id, { inboundId: next.id, status: failures.length ? "partial" : "synced", failures, updatedAt: now() });
+  const provisioning: Array<{ userId: string; status: string; errors: Array<{ nodeId: string; message: string }> }> = [];
   if (next.planEnabled !== false) {
     const users = await listAll<User>(store, "users");
-    for (const user of users.filter((item) => item.enabled && servesPlan(next, item))) await syncUserEntitlements(store, c.env, user.id);
+    for (const user of users.filter((item) => item.enabled && servesPlan(next, item))) {
+      try {
+        const result = await syncUserEntitlements(store, c.env, user.id);
+        provisioning.push({ userId: user.id, status: result.status, errors: result.errors.slice(0, 5) });
+      } catch (error) {
+        provisioning.push({ userId: user.id, status: "failed", errors: [{ nodeId: "", message: error instanceof Error ? error.message : "Provisioning failed." }] });
+      }
+    }
   }
-  return c.json({ inbound: next, refreshed, recreated, failures, syncStatus: failures.length ? "partial" : "synced" }, { status: failures.length ? 207 : 200 });
+  const syncFailed = failures.length > 0 || provisioning.some((entry) => entry.status !== "synced");
+  return c.json({
+    inbound: next, refreshed, recreated, failures, provisioning,
+    syncStatus: syncFailed ? "partial" : "synced",
+  }, { status: syncFailed ? 207 : 200 });
 });
 
 admin.delete("/inbounds/:id", requireAdmin, async (c) => {

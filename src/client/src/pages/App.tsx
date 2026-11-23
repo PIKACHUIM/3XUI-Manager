@@ -769,11 +769,15 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
   const resyncAdminInbound = async (inboundId: string) => {
     setResyncingInbound(inboundId);
     try {
-      const result = await apiRequest<{ refreshed: boolean; recreated: string[]; failures: Array<{ nodeId: string; message: string }> }>(`/api/admin/inbounds/${encodeURIComponent(inboundId)}/resync`, { method: "POST" });
+      const result = await apiRequest<{ refreshed: boolean; recreated: string[]; failures: Array<{ nodeId: string; message: string }>; provisioning?: Array<{ userId: string; status: string; errors: Array<{ nodeId: string; message: string }> }> }>(`/api/admin/inbounds/${encodeURIComponent(inboundId)}/resync`, { method: "POST" });
       setRefreshToken((value) => value + 1);
       const rebuilt = result.recreated.length ? say(locale, `，重建 ${result.recreated.length} 个节点`, `, rebuilt ${result.recreated.length}`) : "";
+      const syncFailures = (result.provisioning ?? []).filter((entry) => entry.status !== "synced");
       if (result.failures.length) flash(say(locale, `${result.failures.length} 个节点同步失败${rebuilt}`, `${result.failures.length} node(s) failed${rebuilt}`));
-      else flash(say(locale, `已重新同步${rebuilt}`, `Resynced${rebuilt}`));
+      else if (syncFailures.length) {
+        const detail = syncFailures.flatMap((entry) => entry.errors.map((error) => error.message)).join("; ").slice(0, 160);
+        flash(say(locale, `${syncFailures.length} 个账号下发失败：${detail}`, `${syncFailures.length} account(s) failed: ${detail}`));
+      } else flash(say(locale, `已重新同步${rebuilt}`, `Resynced${rebuilt}`));
     } catch (error) {
       setApiError(error instanceof Error ? error.message : say(locale, "重新同步失败。", "The resync failed."));
     } finally {
