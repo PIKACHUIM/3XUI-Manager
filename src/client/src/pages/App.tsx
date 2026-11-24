@@ -1679,7 +1679,16 @@ function UserPlanDialog({ t, locale, user, plans, onClose, onSaved }: { t: TextF
     setBusy(true);
     setError("");
     try {
-      await apiRequest(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const result = await apiRequest<{ sync?: { status: "synced" | "partial" | "failed"; errors?: Array<{ nodeId: string; message: string }> } }>(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const sync = result.sync;
+      const detail = sync?.errors?.[0]?.message?.slice(0, 120) ?? "";
+      if (sync && sync.status !== "synced") {
+        onSaved(text(
+          `${message}但节点同步${sync.status === "partial" ? "部分失败" : "失败"}${detail ? `：${detail}` : ""}`,
+          `${message} Node sync ${sync.status}${detail ? `: ${detail}` : ""}`,
+        ));
+        return;
+      }
       onSaved(message);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : text("保存失败。", "The update failed."));
