@@ -8,6 +8,7 @@ import { requireAdmin, validateSameOrigin } from "./context";
 import type { ClientMapping, Inbound, InboundNodeBinding, Invite, NodeRecord, Order, Plan, User } from "../domain/types";
 import { validatePanelUrl, probeNode, ThreeXuiClient, readPanelClients, type XuiInbound } from "../adapters/xui/client";
 import { syncClientToNodes, syncUserEntitlements } from "../services/xui-sync";
+import { runNodeSync } from "../services/xui-node-sync";
 import { D1Store } from "../storage/d1";
 import type { DocumentStore, Page } from "../storage/store";
 
@@ -269,10 +270,32 @@ admin.patch("/plans/:id", requireAdmin, async (c) => {
   if (!body) return c.json({ error: "Invalid request body." }, 400);
   const values = planValues({ ...plan, ...body });
   if (!values) return c.json({ error: "Plan values are invalid." }, 422);
+  const previous = { trafficBytes: plan.trafficBytes, level: plan.level };
   Object.assign(plan, values, { updatedAt: now() });
   if (plan.isDefault && (plan.priceMinor !== 0 || plan.level !== 0)) return c.json({ error: "The default plan must keep level and price at zero." }, 422);
   await store.put("plans", id, plan);
-  return c.json({ plan });
+  // The plan is the source of truth: the quota and level of the accounts already on it follow the
+  // plan right away, and the panel is rewritten in the background so no stale quota survives.
+  let updatedUsers = 0;
+  if (plan.trafficBytes !== previous.trafficBytes || plan.level !== previous.level) {
+    const changedAt = now();
+    for (const user of await listAll<User>(store, "users")) {
+      if (user.planId !== id) continue;
+      if (user.planTrafficBytes === plan.trafficBytes && user.planLevel === plan.level) continue;
+      user.planTrafficBytes = plan.trafficBytes;
+      user.planLevel = plan.level;
+      user.updatedAt = changedAt;
+      await store.put("users", user.id, user);
+      updatedUsers += 1;
+    }
+    if (updatedUsers > 0) {
+      const task = runNodeSync(c.env).catch((error: unknown) => {
+        console.error(JSON.stringify({ event: "plan_panel_sync_failed", planId: id, message: error instanceof Error ? error.message : "unknown" }));
+      });
+      try { c.executionCtx.waitUntil(task); } catch { /* the test runtime has no execution context */ }
+    }
+  }
+  return c.json({ plan, updatedUsers });
 });
 
 admin.delete("/plans/:id", requireAdmin, async (c) => {

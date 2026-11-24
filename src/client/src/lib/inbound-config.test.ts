@@ -126,7 +126,7 @@ describe("inbound config builder", () => {
       clientFlow: "xtls-rprx-vision",
     });
     expect(meta).toEqual({
-      listen: "", total: 1_500_000_000, expiryTime: Date.parse("2027-01-02T03:04"), trafficReset: "monthly",
+      listen: "", total: 1_610_612_736, expiryTime: Date.parse("2027-01-02T03:04"), trafficReset: "monthly",
       trafficResetDay: 7, tag: "tokyo-ws", shareAddrStrategy: "custom", shareAddr: "edge.example.test",
       subSortIndex: 4, excludeFromSub: true, disableFlow: true, defaultFlow: "xtls-rprx-vision",
     });

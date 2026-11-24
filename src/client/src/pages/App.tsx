@@ -83,10 +83,15 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+const BYTES_PER_GB = 1024 ** 3;
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 GB";
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  return `${(bytes / 1_000_000).toFixed(0)} MB`;
+  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(2)} TB`;
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }
 
 function formatMoney(amountMinor: number, currency: string, locale: Locale): string {
@@ -114,6 +119,20 @@ function parseMoneyInput(value: string, currency: string): number | null {
   if (fraction.length > digits) return null;
   const amount = Number(whole) * 10 ** digits + Number((fraction + "0".repeat(digits)).slice(0, digits) || "0");
   return Number.isSafeInteger(amount) ? amount : null;
+}
+
+/** Renders a stored minor-unit amount back into the major-unit text the admin typed. */
+function moneyInputValue(amountMinor: number, currency: string): string {
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) return "0";
+  const digits = moneyFractionDigits(currency);
+  if (digits <= 0) return String(Math.round(amountMinor));
+  return (amountMinor / 10 ** digits).toFixed(digits).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** Renders stored bytes as the 1024-based GB number the plan form accepts. */
+function gbInputValue(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0";
+  return String(Number((bytes / BYTES_PER_GB).toPrecision(12)));
 }
 
 function formatDate(value: string, locale: Locale): string {
@@ -1015,7 +1034,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   const [fields, setFields] = useState<Record<string, string | boolean>>(() => {
     const defaults: Record<string, string | boolean> = {
       email: "", userPassword: "", planId: "", name: "", description: "", level: "1", trafficGb: "10",
-      validityDays: "30", priceMinor: "1000", currency: "USD", resetUnit: "month", resetInterval: "1",
+      validityDays: "30", price: "10.00", currency: "USD", resetUnit: "month", resetInterval: "1",
       resetAtHour: "0", resetWeekday: "1", resetMonthDay: "1", allowPaidUpgrade: false, region: "",
       panelUrl: "", publicAddress: "", username: "", password: "", apiToken: "", basePath: "/",
       ...inboundDefaults, role: "user", enabled: true, planExpiresAt: "",
@@ -1023,7 +1042,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     if (!initial) return defaults;
     if (kind === "plan") {
       const plan = initial as ApiPlan;
-      return { ...defaults, name: plan.name, description: plan.description, level: String(plan.level), trafficGb: String(plan.trafficBytes / 1_000_000_000), validityDays: String(plan.validityDays), priceMinor: String(plan.priceMinor), currency: plan.currency, resetUnit: plan.resetUnit, resetInterval: String(plan.resetInterval), resetAtHour: String(plan.resetAtHour), resetWeekday: String(plan.resetWeekday), resetMonthDay: String(plan.resetMonthDay), allowPaidUpgrade: plan.allowPaidUpgrade, enabled: plan.enabled, hidden: plan.hidden === true };
+      return { ...defaults, name: plan.name, description: plan.description, level: String(plan.level), trafficGb: gbInputValue(plan.trafficBytes), validityDays: String(plan.validityDays), price: moneyInputValue(plan.priceMinor, plan.currency), currency: plan.currency, resetUnit: plan.resetUnit, resetInterval: String(plan.resetInterval), resetAtHour: String(plan.resetAtHour), resetWeekday: String(plan.resetWeekday), resetMonthDay: String(plan.resetMonthDay), allowPaidUpgrade: plan.allowPaidUpgrade, enabled: plan.enabled, hidden: plan.hidden === true };
     }
     if (kind === "node") {
       const node = initial as AdminNodeRecord;
@@ -1152,9 +1171,13 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     try {
       let body: Record<string, unknown>;
       if (kind === "plan") {
-        const trafficBytes = Number(fields.trafficGb) * 1_000_000_000;
-        if (!Number.isSafeInteger(trafficBytes)) throw new Error(text("流量必须是可表示的安全整数 GB。", "Traffic must resolve to a safe whole-byte value."));
-        body = { name: String(fields.name).trim(), description: fields.description, level: Number(fields.level), trafficBytes, validityDays: Number(fields.validityDays), priceMinor: Number(fields.priceMinor), currency: String(fields.currency).toUpperCase(), resetUnit: fields.resetUnit, resetInterval: Number(fields.resetInterval), resetAtHour: Number(fields.resetAtHour), resetWeekday: Number(fields.resetWeekday), resetMonthDay: Number(fields.resetMonthDay), allowPaidUpgrade: fields.allowPaidUpgrade === true, enabled: fields.enabled === true, hidden: fields.hidden === true };
+        const trafficGb = Number(fields.trafficGb);
+        const trafficBytes = Math.round(trafficGb * BYTES_PER_GB);
+        if (!Number.isFinite(trafficGb) || trafficGb < 0 || !Number.isSafeInteger(trafficBytes)) throw new Error(text("流量必须是可表示的安全整数 GB。", "Traffic must resolve to a safe whole-byte value."));
+        const currency = String(fields.currency).toUpperCase();
+        const priceMinor = parseMoneyInput(String(fields.price ?? ""), currency);
+        if (priceMinor === null) throw new Error(text("价格格式不正确，请直接输入金额，例如 99.99。", "Enter the price as an amount, for example 99.99."));
+        body = { name: String(fields.name).trim(), description: fields.description, level: Number(fields.level), trafficBytes, validityDays: Number(fields.validityDays), priceMinor, currency, resetUnit: fields.resetUnit, resetInterval: Number(fields.resetInterval), resetAtHour: Number(fields.resetAtHour), resetWeekday: Number(fields.resetWeekday), resetMonthDay: Number(fields.resetMonthDay), allowPaidUpgrade: fields.allowPaidUpgrade === true, enabled: fields.enabled === true, hidden: fields.hidden === true };
       } else if (kind === "node") {
         if (!initial && !String(fields.password) && !String(fields.apiToken)) throw new Error(text("请填写面板密码或 API Token。", "Provide a panel password or API token."));
         body = { name: String(fields.name).trim(), region: fields.region, panelUrl: String(fields.panelUrl).trim(), publicAddress: fields.publicAddress, username: fields.username, basePath: fields.basePath, enabled: fields.enabled === true, ...(fields.password ? { password: fields.password } : {}), ...(fields.apiToken ? { apiToken: fields.apiToken } : {}) };
@@ -1215,10 +1238,11 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         {wideField("description", text("描述", "Description"), { maxLength: 500 })}
       </>)}
       {formSection(text("流量与价格", "Traffic and price"), <>
-        {field("trafficGb", text("流量（十进制 GB）", "Traffic (decimal GB)"), { type: "number", min: 0, step: 0.001, required: true })}
+        {field("trafficGb", text("流量（GB，1024 进制）", "Traffic (GB, 1024-based)"), { type: "number", min: 0, step: "any", required: true })}
         {field("validityDays", text("有效天数（0 表示不限期）", "Validity days (0 = no expiry)"), { type: "number", min: 0, step: 1, required: true })}
-        {field("priceMinor", text("价格（最小货币单位）", "Price (minor currency units)"), { type: "number", min: 0, step: 1, required: true, disabled: planEditingDefault })}
+        {field("price", phrase(locale, "价格（{currency}）", "Price ({currency})", { currency: String(fields.currency || "USD").toUpperCase() }), { type: "number", min: 0, step: "any", required: true, disabled: planEditingDefault })}
         {field("currency", text("币种", "Currency"), { required: true, minLength: 3, maxLength: 3 })}
+        <div className="admin-form-wide admin-form-note">{text("价格直接填金额，例如 99.99 就是 99.99；流量按 1024 进制 GB 换算，和节点面板显示一致。保存后已订阅该套餐的账户会立即同步新的流量。", "Enter the price as the amount itself, for example 99.99. Traffic uses 1024-based GB, matching the node panel. Saving pushes the new quota to every account already on the plan.")}</div>
       </>)}
       {formSection(text("重置与选项", "Reset and options"), <>
         <label><span>{text("重置周期", "Reset cycle")}</span><select value={String(fields.resetUnit)} onChange={(event) => setFields((current) => ({ ...current, resetUnit: event.target.value }))}><option value="none">{say(locale, "不限", "None")}</option><option value="day">{say(locale, "每日", "Daily")}</option><option value="week">{say(locale, "每周", "Weekly")}</option><option value="month">{say(locale, "每月", "Monthly")}</option><option value="year">{say(locale, "每年", "Yearly")}</option></select></label>
@@ -1226,7 +1250,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
         {checkField("enabled", text("启用套餐", "Plan enabled"))}
         {checkField("hidden", text("对用户隐藏（仍可由管理员分配）", "Hide from users (admins can still assign it)"))}
       </>)}
-      {planEditingDefault && <div className="admin-form-note">{text("默认免费套餐固定等级 0、价格 0，可调整流量与有效期；改动只对之后创建的账户生效，已有账户保留各自额度。", "The default free plan keeps level 0 and price 0. Traffic and validity apply to accounts created afterwards; existing accounts keep their own quota.")}</div>}
+      {planEditingDefault && <div className="admin-form-note">{text("默认免费套餐固定等级 0、价格 0，可调整流量与有效期；流量改动会同步到已在使用该套餐的账户。", "The default free plan keeps level 0 and price 0. Traffic changes apply to every account already on the plan.")}</div>}
     </>}
     {kind === "node" && <>
       {formSection(text("节点信息", "Node details"), <>
@@ -1654,7 +1678,7 @@ function InboundSyncDialog({ t, locale, nodes, initialNodeId, onClose, onImporte
 }
 
 function UserDashboard({ t, locale, overview, nodes, recentOrders, onNavigate, onCopy }: { t: TextFn; locale: Locale; overview: UserOverviewData | null; nodes: DisplayNode[]; recentOrders: DisplayOrderRow[]; onNavigate: (page: PageKey) => void; onCopy: () => void }) {
-  const usageChartData = (overview?.usage.days ?? []).map((day) => ({ day: day.usageDay.slice(5), used: day.billedBytes / 1_000_000_000 }));
+  const usageChartData = (overview?.usage.days ?? []).map((day) => ({ day: day.usageDay.slice(5), used: Number((day.billedBytes / BYTES_PER_GB).toFixed(3)) }));
   const usagePercent = overview && overview.usage.limitBytes > 0 ? Math.min(100, overview.usage.usedBytes / overview.usage.limitBytes * 100) : 0;
   const remainingHint = !overview || overview.usage.limitBytes === 0
     ? say(locale, "未设置流量额度", "No traffic limit")
@@ -2015,8 +2039,8 @@ function settingsDraft(settings: Record<string, unknown>): Record<string, string
     userInviteLimit: number("userInviteLimit", 0),
     referralPercent: number("referralPercent", 0),
     referralValidityDays: number("referralValidityDays", 30),
-    checkinMinRewardGb: String(Number(number("checkinMinTrafficBytes", reward)) / 1_000_000_000),
-    checkinMaxRewardGb: String(Number(number("checkinMaxTrafficBytes", reward)) / 1_000_000_000),
+    checkinMinRewardGb: String(Number(number("checkinMinTrafficBytes", reward)) / BYTES_PER_GB),
+    checkinMaxRewardGb: String(Number(number("checkinMaxTrafficBytes", reward)) / BYTES_PER_GB),
     ...Object.fromEntries(["publicAppUrl", "turnstileSiteKey", "resendFrom", "waffoMerchantId", "waffoPublicKey"].map((key) => [key, typeof settings[key] === "string" ? settings[key] : ""])),
     waffoEnvironment: settings.waffoEnvironment === "production" ? "production" : "sandbox",
     turnstileSecretKey: "", resendApiKey: "", waffoApiKey: "", waffoSigningKey: "",
@@ -2105,7 +2129,7 @@ function SystemPage({ t, locale, onSaved, theme, accent, onTheme, onAccent, onLo
         const min = decimalNumber("checkinMinRewardGb", 0, 1000);
         const max = decimalNumber("checkinMaxRewardGb", 0, 1000);
         if (min > max) throw new Error(say(locale, "奖励下限不能大于上限。", "The minimum reward cannot exceed the maximum."));
-        Object.assign(payload, { checkinMinTrafficBytes: Math.round(min * 1_000_000_000), checkinMaxTrafficBytes: Math.round(max * 1_000_000_000) });
+        Object.assign(payload, { checkinMinTrafficBytes: Math.round(min * BYTES_PER_GB), checkinMaxTrafficBytes: Math.round(max * BYTES_PER_GB) });
       } else if (tab === "payment") {
         for (const key of ["waffoMerchantId", "waffoPublicKey", "waffoEnvironment"]) text(key);
         secret("waffoApiKey");
@@ -2178,9 +2202,9 @@ function SystemPage({ t, locale, onSaved, theme, accent, onTheme, onAccent, onLo
         {inputRow("referralValidityDays", say(locale, "返利有效期", "Referral validity"), say(locale, "超过该天数的订单不再返利。", "Orders placed after this window earn no commission."), { type: "number", min: 0, max: 3650, step: "1", suffix: say(locale, "天", "days") })}
       </>}
       {draft && tab === "attendance" && <>
-        {inputRow("checkinMinRewardGb", say(locale, "签到奖励下限", "Minimum check-in reward"), say(locale, "可为 0；每次签到在上下限间随机奖励。", "May be 0; each check-in grants a random reward within the range."), { type: "number", min: 0, max: 1000, step: "0.000000001", suffix: "GB" })}
-        {inputRow("checkinMaxRewardGb", say(locale, "签到奖励上限", "Maximum check-in reward"), say(locale, "上限为 0 时关闭签到；上下限相同时奖励固定。", "Set to 0 to disable check-in; equal bounds grant a fixed reward."), { type: "number", min: 0, max: 1000, step: "0.000000001", suffix: "GB" })}
-        <p className="settings-note">{say(locale, "使用十进制 GB：1 GB = 1,000,000,000 字节。", "Decimal GB: 1 GB = 1,000,000,000 bytes.")}</p>
+        {inputRow("checkinMinRewardGb", say(locale, "签到奖励下限", "Minimum check-in reward"), say(locale, "可为 0；每次签到在上下限间随机奖励。", "May be 0; each check-in grants a random reward within the range."), { type: "number", min: 0, max: 1000, step: "any", suffix: "GB" })}
+        {inputRow("checkinMaxRewardGb", say(locale, "签到奖励上限", "Maximum check-in reward"), say(locale, "上限为 0 时关闭签到；上下限相同时奖励固定。", "Set to 0 to disable check-in; equal bounds grant a fixed reward."), { type: "number", min: 0, max: 1000, step: "any", suffix: "GB" })}
+        <p className="settings-note">{say(locale, "统一使用 1024 进制：1 GB = 1,024 MiB = 1,073,741,824 字节。", "1024-based units: 1 GB = 1,024 MiB = 1,073,741,824 bytes.")}</p>
       </>}
       {draft && tab === "payment" && <>
         {inputRow("waffoMerchantId", "Waffo Merchant ID", say(locale, "Waffo 商户编号。", "Your Waffo merchant identifier."))}

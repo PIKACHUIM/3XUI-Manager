@@ -156,6 +156,9 @@ export const domainStrategies = ["AsIs", "UseIP", "UseIPv4", "UseIPv6"] as const
 export const kcpHeaderTypes = ["none", "srtp", "utp", "wechat-video", "dtls", "wireguard"] as const;
 export const xhttpModes = ["auto", "packet-up", "stream-up", "stream-one"] as const;
 
+/** 3X-UI shows and stores traffic in 1024-based units, so the editor converts the same way. */
+const BYTES_PER_GB = 1024 ** 3;
+
 const text = (fields: InboundFieldMap, key: string): string => {
   const value = fields[key];
   if (typeof value === "string") return value.trim();
@@ -673,7 +676,7 @@ export function buildInboundConfig(fields: InboundFieldMap): Record<string, unkn
 /** Converts the inbound-level fields 3X-UI keeps outside settings/streamSettings/sniffing. */
 export function buildInboundMeta(fields: InboundFieldMap): InboundMeta {
   const gigabytes = number(fields, "totalGb", 0, 0);
-  const total = Math.round(gigabytes * 1_000_000_000);
+  const total = Math.round(gigabytes * BYTES_PER_GB);
   const expiry = text(fields, "expiryTime");
   const parsedExpiry = expiry ? Date.parse(expiry) : Number.NaN;
   const strategy = text(fields, "shareAddrStrategy");
@@ -753,7 +756,7 @@ export function inboundFieldValues(record: InboundConfigRecord): InboundFieldMap
     baseConfig: JSON.stringify(config),
     security: plainText(stream.security, "none"),
     // Inbound-level 3X-UI fields.
-    totalGb: record.total ? String(record.total / 1_000_000_000) : "",
+    totalGb: record.total ? String(record.total / BYTES_PER_GB) : "",
     expiryTime: localDateTime(record.expiryTime ?? 0),
     trafficReset,
     trafficResetDay: String(record.trafficResetDay ?? 0),

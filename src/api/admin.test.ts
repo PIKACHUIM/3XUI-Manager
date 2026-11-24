@@ -51,7 +51,7 @@ describe("admin API local D1 integration", () => {
   beforeAll(async () => {
     platform = await createD1TestPlatform(fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)));
     const database = platform.env.DB;
-    for (const migrationUrl of ["../../migrations/0001_init.sql", "../../migrations/0002_usage_event_apply_state.sql", "../../migrations/0003_atomic_traffic_samples.sql"]) {
+    for (const migrationUrl of ["../../migrations/0001_init.sql", "../../migrations/0002_usage_event_apply_state.sql", "../../migrations/0003_atomic_traffic_samples.sql", "../../migrations/0004_gib_units.sql"]) {
       const sql = await readFile(new URL(migrationUrl, import.meta.url), "utf8");
       const statements = sql.split(";").map((statement) => statement.trim()).filter((statement) => statement && !statement.startsWith("PRAGMA "));
       await database.batch(statements.map((statement) => database.prepare(statement)));
@@ -1498,16 +1498,27 @@ describe("admin API local D1 integration", () => {
       key, await store.get<{ key: string; value: unknown; updatedAt: string }>("settings", key),
     ] as const));
     const connect = noopPanel();
+    const backfillUser: User = {
+      id: `local-plan-backfill-${crypto.randomUUID()}`, email: `backfill-${crypto.randomUUID()}@example.test`, passwordHash: "",
+      emailVerifiedAt: null, role: "user", balanceMinor: 0, planId: "plan-free", planLevel: 0,
+      planExpiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), planTrafficBytes: original.trafficBytes, billedBytes: 0,
+      planStartedAt: new Date().toISOString(), trafficResetAt: null, enabled: true, inviteCode: null, invitedBy: null,
+      inviteCount: 0, checkinStreak: 0, lastCheckinAt: null, lastActiveAt: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), appliedPaymentIds: [],
+    };
     let adminUserId = "";
     let adminEmail = "";
     let registeredUserId = "";
     let registeredEmail = "";
     try {
+      await store.put("users", backfillUser.id, backfillUser);
       const updated = await request("/api/admin/plans/plan-free", {
         method: "PATCH", headers, body: JSON.stringify({ trafficBytes: 5_000_000_000, validityDays: 30 }),
       });
       expect(updated.status).toBe(200);
       expect((await updated.json() as { plan: Plan }).plan).toMatchObject({ trafficBytes: 5_000_000_000, validityDays: 30, level: 0, priceMinor: 0 });
+      // The plan is the source of truth: accounts already on it follow the new quota right away.
+      expect(await store.get<User>("users", backfillUser.id)).toMatchObject({ planTrafficBytes: 5_000_000_000, planLevel: 0 });
 
       const rejected = await request("/api/admin/plans/plan-free", { method: "PATCH", headers, body: JSON.stringify({ level: 2 }) });
       expect(rejected.status).toBe(422);
@@ -1538,6 +1549,7 @@ describe("admin API local D1 integration", () => {
       connect.mockRestore();
       const plan = await store.get<Plan>("plans", "plan-free");
       if (plan) await store.put("plans", "plan-free", { ...plan, ...original });
+      await store.delete("users", backfillUser.id);
       if (adminUserId) {
         await store.delete("users", adminUserId);
         await store.delete("user-email", adminEmail);

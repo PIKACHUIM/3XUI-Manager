@@ -44,7 +44,7 @@ describe("D1Store traffic accounting", () => {
   beforeAll(async () => {
     platform = await createD1TestPlatform(fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)));
     database = platform.env.DB;
-    for (const migrationUrl of ["../../migrations/0001_init.sql", "../../migrations/0002_usage_event_apply_state.sql", "../../migrations/0003_atomic_traffic_samples.sql"]) {
+    for (const migrationUrl of ["../../migrations/0001_init.sql", "../../migrations/0002_usage_event_apply_state.sql", "../../migrations/0003_atomic_traffic_samples.sql", "../../migrations/0004_gib_units.sql"]) {
       const sql = await readFile(new URL(migrationUrl, import.meta.url), "utf8");
       const statements = sql.split(";").map((statement) => statement.trim()).filter((statement) => statement && !statement.startsWith("PRAGMA "));
       await database.batch(statements.map((statement) => database.prepare(statement)));
