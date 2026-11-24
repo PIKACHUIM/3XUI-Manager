@@ -250,7 +250,16 @@ describe("subscription authorization", () => {
     expect((await subscriptionCredential(store, "u", key)).token).toBe(firstToken);
     const clash = await request(new URL(first.links.clash!).pathname + "?format=clash");
     expect(clash.status).toBe(200); expect(clash.headers.get("content-type")).toContain("application/yaml");
-    expect(clash.headers.get("cache-control")).toContain("no-store");
+    expect(clash.headers.get("cache-control")).toContain("must-revalidate");
+    const tag = clash.headers.get("etag");
+    expect(tag).toMatch(/^"[0-9a-f]{20}"$/);
+    const revalidated = await request(new URL(first.links.clash!).pathname + "?format=clash", { headers: { "If-None-Match": tag! } });
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get("etag")).toBe(tag);
+    expect(revalidated.headers.get("subscription-userinfo")).toContain("total=");
+    expect(await revalidated.text()).toBe("");
+    expect((await request(new URL(first.links.clash!).pathname + "?format=clash", { headers: { "If-None-Match": `W/${tag!}` } })).status).toBe(304);
+    expect((await request(new URL(first.links.clash!).pathname + "?format=clash", { headers: { "If-None-Match": '"stale"' } })).status).toBe(200);
     const v2ray = await request(new URL(first.links.v2ray!).pathname + "?format=v2ray");
     expect(atob(await v2ray.text())).toContain("vless://");
     expect((await request(new URL(first.links.shadowsocks!).pathname + "?format=shadowsocks")).status).toBe(422);
