@@ -6,7 +6,7 @@ import { encryptSecret, hashPassword } from "../domain/security";
 import type { ApiEnv } from "./context";
 import { requireAdmin, validateSameOrigin } from "./context";
 import type { ClientMapping, Inbound, InboundNodeBinding, Invite, NodeRecord, Order, Plan, User } from "../domain/types";
-import { validatePanelUrl, probeNode, ThreeXuiClient, type XuiInbound } from "../adapters/xui/client";
+import { validatePanelUrl, probeNode, ThreeXuiClient, readPanelClients, type XuiInbound } from "../adapters/xui/client";
 import { syncClientToNodes, syncUserEntitlements } from "../services/xui-sync";
 import { D1Store } from "../storage/d1";
 import type { DocumentStore, Page } from "../storage/store";
@@ -488,6 +488,45 @@ admin.get("/inbounds/remote", requireAdmin, async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Unable to read panel inbounds." }, 502);
   }
+});
+
+/**
+ * Read-only view of the panel-side clients of one inbound, so drift between the account and the
+ * node can be inspected without opening 3X-UI. Secrets are never returned, only their presence.
+ */
+admin.get("/inbounds/:id/panel-clients", requireAdmin, async (c) => {
+  const store = c.get("store");
+  const inbound = await store.get<Inbound>("inbounds", c.req.param("id") ?? "");
+  if (!inbound) return c.json({ error: "Inbound not found." }, 404);
+  const bindings = await listAll<InboundNodeBinding>(store, "inbound-node-bindings", `${inbound.id}:`);
+  const items: Array<Record<string, unknown>> = [];
+  for (const binding of bindings) {
+    if (binding.panelInboundId <= 0) continue;
+    const node = await store.get<NodeRecord>("nodes", binding.nodeId);
+    if (!node) continue;
+    try {
+      const client = await ThreeXuiClient.connect(c.env, node);
+      const panelInbounds = await client.listInbounds();
+      const rows = readPanelClients(panelInbounds, binding.panelInboundId);
+      const usage = client.readClientUsage(panelInbounds, binding.panelInboundId);
+      for (const [email, row] of rows ?? []) {
+        items.push({
+          nodeId: node.id,
+          nodeName: node.name,
+          email,
+          enable: row.enable !== false,
+          totalGB: Number(row.totalGB ?? 0),
+          expiryTime: Number(row.expiryTime ?? 0),
+          flow: typeof row.flow === "string" ? row.flow : "",
+          hasAuth: typeof row.auth === "string" && row.auth.length > 0,
+          usedBytes: usage.get(email) ?? 0,
+        });
+      }
+    } catch (error) {
+      items.push({ nodeId: node.id, nodeName: node.name, error: error instanceof Error ? error.message : "Unable to read panel clients." });
+    }
+  }
+  return c.json({ items, count: items.length });
 });
 
 admin.post("/inbounds/import", requireAdmin, async (c) => {
