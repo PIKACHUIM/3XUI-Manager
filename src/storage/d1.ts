@@ -1,4 +1,4 @@
-import type { UsageEvent, User } from "../domain/types";
+import type { Plan, UsageEvent, User } from "../domain/types";
 import type { DocumentStore, ListOptions, Page } from "./store";
 
 export interface TrafficSampleInput {
@@ -173,6 +173,32 @@ export class D1Store implements DocumentStore {
     const row = await this.db.prepare("SELECT 1 AS found FROM app_records WHERE collection = ? AND record_id = ?")
       .bind(collection, id).first<{ found: number }>();
     return row !== null;
+  }
+
+  /**
+   * Resolves a subscription token in a single round trip: the token index, the credential that must
+   * still carry the same hash, the account and its plan. Done one query at a time this is four round
+   * trips, which dominates the latency of every subscription refresh.
+   */
+  async readSubscriptionAccess(tokenHash: string): Promise<{ user: User; plan: Plan | null } | null> {
+    const owner = "SELECT json_extract(document, '$.userId') FROM app_records WHERE collection = 'subscription-token-index' AND record_id = ?";
+    const [credential, account, plan] = await this.db.batch<{ document: string }>([
+      this.db.prepare(`SELECT document FROM app_records WHERE collection = 'subscription-credentials' AND record_id = (${owner})`).bind(tokenHash),
+      this.db.prepare(`SELECT document FROM app_records WHERE collection = 'users' AND record_id = (${owner})`).bind(tokenHash),
+      this.db.prepare(`SELECT document FROM app_records WHERE collection = 'plans' AND record_id = (
+        SELECT json_extract(document, '$.planId') FROM app_records WHERE collection = 'users' AND record_id = (${owner})
+      )`).bind(tokenHash),
+    ]);
+    const credentialRow = credential?.results?.[0];
+    const userRow = account?.results?.[0];
+    if (!credentialRow || !userRow) return null;
+    const credentialRecord = JSON.parse(credentialRow.document) as { tokenHash?: unknown };
+    if (credentialRecord.tokenHash !== tokenHash) return null;
+    const planRow = plan?.results?.[0];
+    return {
+      user: JSON.parse(userRow.document) as User,
+      plan: planRow ? JSON.parse(planRow.document) as Plan : null,
+    };
   }
 
   async acquireLease(name: string, owner: string, expiresAt: number): Promise<boolean> {

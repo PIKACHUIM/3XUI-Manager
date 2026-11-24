@@ -3,35 +3,46 @@ import { decryptSecret, encryptSecret, randomToken, sha256 } from "../domain/sec
 import { wireGuardPublicKey } from "../domain/wireguard";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, Plan, User } from "../domain/types";
 import type { DocumentStore } from "../storage/store";
+import { D1Store } from "../storage/d1";
 import { listCollection } from "./xui-sync";
 
 export interface SubscriptionCredential { userId: string; tokenHash: string; encryptedToken: string; updatedAt: string }
 export type SubscriptionFormat = "clash" | "v2ray" | "shadowsocks";
 export async function subscriptionCredential(store: DocumentStore, userId: string, key: string, reset = false): Promise<{ token: string; updatedAt: string }> {
+  // The common path only reads the token, so it must not take the rotation lease.
+  const old = await store.get<SubscriptionCredential>("subscription-credentials", userId);
+  if (old && !reset) return { token: await decryptSecret(old.encryptedToken, key), updatedAt: old.updatedAt };
   const owner = randomToken();
   if (!await store.acquireLease(`subscription:${userId}`, owner, Date.now() + 30000)) throw new Error("Subscription update in progress.");
   try {
-    const old = await store.get<SubscriptionCredential>("subscription-credentials", userId);
-    if (old && !reset) return { token: await decryptSecret(old.encryptedToken, key), updatedAt: old.updatedAt };
+    const current = await store.get<SubscriptionCredential>("subscription-credentials", userId);
+    if (current && !reset) return { token: await decryptSecret(current.encryptedToken, key), updatedAt: current.updatedAt };
     const token = randomToken(32);
     const record = { userId, tokenHash: await sha256(token), encryptedToken: await encryptSecret(token, key), updatedAt: new Date().toISOString() };
     await store.put("subscription-token-index", record.tokenHash, { userId });
     await store.put("subscription-credentials", userId, record);
-    if (old) await store.delete("subscription-token-index", old.tokenHash);
+    if (current) await store.delete("subscription-token-index", current.tokenHash);
     return { token, updatedAt: record.updatedAt };
   } finally { await store.releaseLease(`subscription:${userId}`, owner); }
 }
-export async function subscriptionUser(store: DocumentStore, token: string): Promise<User | null> {
+/** The account behind a subscription token plus the plan it is on, resolved together. */
+export async function subscriptionAccess(store: DocumentStore, token: string): Promise<{ user: User; plan: Plan | null } | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   const hash = await sha256(token);
+  if (store instanceof D1Store) return store.readSubscriptionAccess(hash);
   const index = await store.get<{ userId: string }>("subscription-token-index", hash);
   if (!index) return null;
-  const current = await store.get<SubscriptionCredential>("subscription-credentials", index.userId);
-  if (current?.tokenHash !== hash) return null;
-  return store.get<User>("users", index.userId);
+  const [credential, user] = await Promise.all([
+    store.get<SubscriptionCredential>("subscription-credentials", index.userId),
+    store.get<User>("users", index.userId),
+  ]);
+  if (credential?.tokenHash !== hash || !user) return null;
+  return { user, plan: await store.get<Plan>("plans", user.planId) };
 }
-export async function subscriptionActive(store: DocumentStore, user: User): Promise<boolean> {
-  const plan = await store.get<Plan>("plans", user.planId);
+export async function subscriptionUser(store: DocumentStore, token: string): Promise<User | null> {
+  return (await subscriptionAccess(store, token))?.user ?? null;
+}
+export function subscriptionIsActive(user: User, plan: Plan | null): boolean {
   return Boolean(plan?.enabled && user.enabled && user.planTrafficBytes > user.billedBytes && (!user.planExpiresAt || Date.parse(user.planExpiresAt) > Date.now()));
 }
 function object(value: unknown): Record<string, unknown> {

@@ -75,6 +75,22 @@ describe("D1Store traffic accounting", () => {
     usageDay: "2026-11-14",
   });
 
+  it("resolves a subscription token, its account and its plan in one batch", async () => {
+    await store.put("plans", "plan-1", { id: "plan-1", enabled: true });
+    await store.put("users", "user-1", { id: "user-1", planId: "plan-1", enabled: true, planTrafficBytes: 10, billedBytes: 1 });
+    await store.put("subscription-credentials", "user-1", { userId: "user-1", tokenHash: "hash-1", encryptedToken: "x.y", updatedAt: "2026-01-01" });
+    await store.put("subscription-token-index", "hash-1", { userId: "user-1" });
+
+    const access = await store.readSubscriptionAccess("hash-1");
+    expect(access?.user).toMatchObject({ id: "user-1", planId: "plan-1" });
+    expect(access?.plan).toMatchObject({ id: "plan-1", enabled: true });
+    expect(await store.readSubscriptionAccess("hash-missing")).toBeNull();
+
+    // An index left behind by a failed rotation must not keep the old token alive.
+    await store.put("subscription-credentials", "user-1", { userId: "user-1", tokenHash: "hash-2", encryptedToken: "x.y", updatedAt: "2026-01-01" });
+    expect(await store.readSubscriptionAccess("hash-1")).toBeNull();
+  });
+
   it("does not double bill overlapping samples and ignores an older sample", async () => {
     await store.recordTrafficSample(sample(1000, "2026-11-14T12:00:00.000Z"));
     const results = await Promise.all([
