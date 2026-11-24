@@ -59,7 +59,7 @@ type AdminOrderRecord = UserOrderData & { userId: string; paidAt: string | null 
 type AdminUserRow = { id: string; name: string; email: string; initials: string; color: string; role: string; plan: string; usage: string; date: string; state: string; enabled: boolean };
 type DisplayOrderRow = { id: string; customer: string; email: string; plan: string; amount: string; method: string; date: string; state: string };
 type DisplayPlanRow = { id: string; name: string; detail: string; level: string; traffic: string; price: string; cycle: string; users: string; tone: string; enabled: boolean; hidden: boolean };
-type DisplayInboundRow = { id: string; name: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean; plans: string[] };
+type DisplayInboundRow = { id: string; name: string; protocol: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean; plans: string[] };
 type UserOverviewData = {
   user: AuthenticatedUser & { balanceMinor: number; planLevel: number; planExpiresAt: string | null; createdAt: string; checkinStreak: number; lastCheckinAt: string | null };
   plan: ApiPlan | null;
@@ -609,7 +609,8 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
       const stats = adminInboundStats.find((item) => item.inboundId === inbound.id);
       return {
         id: inbound.id,
-        name: `${inbound.protocol.toUpperCase()} · ${inbound.name}`,
+        name: inbound.name,
+        protocol: inbound.protocol.toUpperCase(),
         address: `:${inbound.port}/${inbound.network}`,
         node: bindings.map((binding) => nodesById.get(binding.nodeId)?.name ?? binding.nodeId).join(", ") || "—",
         level: phrase(locale, "等级 {n}+", "Level {n}+", { n: inbound.minimumLevel }),
@@ -1820,7 +1821,7 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync, onResync, onD
         <thead><tr><th>{t("inbounds")}</th><th>{t("nodes")}</th><th>{t("level")}</th><th>{t("multiplierLabel")}</th><th>{t("clientCount")}</th><th>{t("status")}</th><th /></tr></thead>
         <tbody>
           {rows.map((row) => <tr key={row.id}>
-            <td className="cell-title"><div className="table-person"><span className="inbound-symbol"><Network size={16} /></span><span><b>{row.name}</b><small>{row.address}</small></span></div></td>
+            <td className="cell-title"><div className="table-person"><span className="inbound-symbol"><Network size={16} /></span><span><span className="table-name-line"><b>{row.name}</b><span className="tag tag-protocol">{row.protocol}</span></span><small>{row.address}</small></span></div></td>
             <td data-label={t("nodes")}>{row.node}</td>
             <td data-label={t("level")}><div className="tag-list"><span className="tag tag-level">{row.level}</span>{row.plans.map((plan, index) => <span className="tag" key={`${plan}-${index}`}>{plan}</span>)}{!row.planEnabled && <span className="tag tag-muted">{say(locale, "未对套餐启用", "No plan")}</span>}</div></td>
             <td data-label={t("multiplierLabel")}><span className="multiplier-chip"><Zap size={12} />{row.multiplier}</span></td>
