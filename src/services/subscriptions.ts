@@ -45,6 +45,30 @@ export async function subscriptionUser(store: DocumentStore, token: string): Pro
 export function subscriptionIsActive(user: User, plan: Plan | null): boolean {
   return Boolean(plan?.enabled && user.enabled && user.planTrafficBytes > user.billedBytes && (!user.planExpiresAt || Date.parse(user.planExpiresAt) > Date.now()));
 }
+
+/** The rows a subscription feed is rendered from. */
+export interface SubscriptionSources { inbounds: Inbound[]; nodes: NodeRecord[]; bindings: InboundNodeBinding[]; mappings: ClientMapping[] }
+export interface SubscriptionFeed { user: User; plan: Plan | null; sources: SubscriptionSources }
+
+async function loadSubscriptionSources(store: DocumentStore, userId: string): Promise<SubscriptionSources> {
+  const [inbounds, nodes, bindings, mappings] = await Promise.all([
+    listCollection<Inbound>(store, "inbounds"), listCollection<NodeRecord>(store, "nodes"),
+    listCollection<InboundNodeBinding>(store, "inbound-node-bindings"), listCollection<ClientMapping>(store, "clients", `${userId}:`),
+  ]);
+  return { inbounds, nodes, bindings, mappings };
+}
+
+/** Resolves the token and loads the feed in one round trip when the driver can batch it. */
+export async function subscriptionFeed(store: DocumentStore, token: string): Promise<SubscriptionFeed | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  if (store instanceof D1Store) {
+    const feed = await store.readSubscriptionFeed(await sha256(token));
+    if (feed) return feed;
+  }
+  const access = await subscriptionAccess(store, token);
+  if (!access) return null;
+  return { ...access, sources: await loadSubscriptionSources(store, access.user.id) };
+}
 function object(value: unknown): Record<string, unknown> {
   if (typeof value === "string") { try { return object(JSON.parse(value)); } catch { return {}; } }
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -337,10 +361,11 @@ function renderClashConfig(proxies: Array<Record<string, unknown>>): string {
   return ["# 3XUI Manager · Clash / Mihomo 订阅配置", ...yamlLines(config, 0)].join("\n") + "\n";
 }
 export async function renderSubscription(store: DocumentStore, user: User, key: string, format: SubscriptionFormat): Promise<{ body: string; contentType: string; count: number; skipped: number }> {
-  const [inbounds, nodes, bindings, mappings] = await Promise.all([
-    listCollection<Inbound>(store, "inbounds"), listCollection<NodeRecord>(store, "nodes"),
-    listCollection<InboundNodeBinding>(store, "inbound-node-bindings"), listCollection<ClientMapping>(store, "clients", `${user.id}:`),
-  ]);
+  return renderSubscriptionFeed(user, await loadSubscriptionSources(store, user.id), key, format);
+}
+/** Renders a feed from already loaded rows, so a request never waits on more than one D1 round trip. */
+export async function renderSubscriptionFeed(user: User, sources: SubscriptionSources, key: string, format: SubscriptionFormat): Promise<{ body: string; contentType: string; count: number; skipped: number }> {
+  const { inbounds, nodes, bindings, mappings } = sources;
   const entries: ProxyEntry[] = []; let skipped = 0;
   const usedNames = new Set<string>(clashCategories.map(([name]) => name));
   for (const inbound of inbounds.sort((a, b) => (a.subSortIndex ?? 0) - (b.subSortIndex ?? 0))) {

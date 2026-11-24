@@ -1,4 +1,4 @@
-import type { Plan, UsageEvent, User } from "../domain/types";
+import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, Plan, UsageEvent, User } from "../domain/types";
 import type { DocumentStore, ListOptions, Page } from "./store";
 
 export interface TrafficSampleInput {
@@ -176,9 +176,56 @@ export class D1Store implements DocumentStore {
   }
 
   /**
+   * Resolves a subscription in one round trip: the token index, the credential that must still carry
+   * the same hash, the account, its plan and the collections the feed renders from. Done query by
+   * query this is seven round trips, which dominates the latency of every subscription refresh.
+   * A truncated collection returns null so the caller can fall back to paginated reads.
+   */
+  async readSubscriptionFeed(tokenHash: string): Promise<{
+    user: User; plan: Plan | null;
+    sources: { inbounds: Inbound[]; nodes: NodeRecord[]; bindings: InboundNodeBinding[]; mappings: ClientMapping[] };
+  } | null> {
+    const owner = "SELECT json_extract(document, '$.userId') FROM app_records WHERE collection = 'subscription-token-index' AND record_id = ?";
+    const cap = 1000;
+    const limit = cap + 1;
+    const results = await this.db.batch<{ document: string }>([
+      this.db.prepare(`SELECT document FROM app_records WHERE collection = 'subscription-credentials' AND record_id = (${owner})`).bind(tokenHash),
+      this.db.prepare(`SELECT document FROM app_records WHERE collection = 'users' AND record_id = (${owner})`).bind(tokenHash),
+      this.db.prepare(`SELECT document FROM app_records WHERE collection = 'plans' AND record_id = (
+        SELECT json_extract(document, '$.planId') FROM app_records WHERE collection = 'users' AND record_id = (${owner})
+      )`).bind(tokenHash),
+      this.db.prepare("SELECT document FROM app_records WHERE collection = 'inbounds' ORDER BY record_id LIMIT ?").bind(limit),
+      this.db.prepare("SELECT document FROM app_records WHERE collection = 'nodes' ORDER BY record_id LIMIT ?").bind(limit),
+      this.db.prepare("SELECT document FROM app_records WHERE collection = 'inbound-node-bindings' ORDER BY record_id LIMIT ?").bind(limit),
+      this.db.prepare(`WITH me AS (
+        SELECT json_extract(document, '$.userId') || ':' AS prefix FROM app_records WHERE collection = 'subscription-token-index' AND record_id = ?
+      ) SELECT record_id, document FROM app_records, me
+        WHERE collection = 'clients' AND substr(record_id, 1, length(me.prefix)) = me.prefix
+        ORDER BY record_id LIMIT ?`).bind(tokenHash, limit),
+    ]);
+    const rows = results.map((result) => result?.results ?? []);
+    const credentialRow = rows[0]?.[0];
+    const userRow = rows[1]?.[0];
+    if (!credentialRow || !userRow) return null;
+    const credentialRecord = JSON.parse(credentialRow.document) as { tokenHash?: unknown };
+    if (credentialRecord.tokenHash !== tokenHash) return null;
+    if (rows.slice(3).some((collection) => collection.length > cap)) return null;
+    const parse = <T>(collection: Array<{ document: string }>): T[] => collection.map((row) => JSON.parse(row.document) as T);
+    return {
+      user: JSON.parse(userRow.document) as User,
+      plan: rows[2]?.[0] ? JSON.parse(rows[2][0]!.document) as Plan : null,
+      sources: {
+        inbounds: parse<Inbound>(rows[3] ?? []),
+        nodes: parse<NodeRecord>(rows[4] ?? []),
+        bindings: parse<InboundNodeBinding>(rows[5] ?? []),
+        mappings: parse<ClientMapping>(rows[6] ?? []),
+      },
+    };
+  }
+
+  /**
    * Resolves a subscription token in a single round trip: the token index, the credential that must
-   * still carry the same hash, the account and its plan. Done one query at a time this is four round
-   * trips, which dominates the latency of every subscription refresh.
+   * still carry the same hash, the account and its plan.
    */
   async readSubscriptionAccess(tokenHash: string): Promise<{ user: User; plan: Plan | null } | null> {
     const owner = "SELECT json_extract(document, '$.userId') FROM app_records WHERE collection = 'subscription-token-index' AND record_id = ?";

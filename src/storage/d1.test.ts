@@ -91,6 +91,27 @@ describe("D1Store traffic accounting", () => {
     expect(await store.readSubscriptionAccess("hash-1")).toBeNull();
   });
 
+  it("loads a whole subscription feed in one batch and only this account's clients", async () => {
+    await store.put("plans", "plan-1", { id: "plan-1", enabled: true });
+    await store.put("users", "user-1", { id: "user-1", planId: "plan-1", enabled: true, planTrafficBytes: 10, billedBytes: 1 });
+    await store.put("subscription-credentials", "user-1", { userId: "user-1", tokenHash: "hash-1", encryptedToken: "x.y", updatedAt: "2026-01-01" });
+    await store.put("subscription-token-index", "hash-1", { userId: "user-1" });
+    await store.put("inbounds", "inbound-1", { id: "inbound-1", name: "Tokyo", protocol: "vless", port: 443 });
+    await store.put("nodes", "node-1", { id: "node-1", name: "Tokyo-1", enabled: true });
+    await store.put("inbound-node-bindings", "inbound-1:node-1", { inboundId: "inbound-1", nodeId: "node-1", panelInboundId: 3 });
+    await store.put("clients", "user-1:inbound-1", { id: "user-1:inbound-1", userId: "user-1", inboundId: "inbound-1" });
+    await store.put("clients", "user-2:inbound-1", { id: "user-2:inbound-1", userId: "user-2", inboundId: "inbound-1" });
+
+    const feed = await store.readSubscriptionFeed("hash-1");
+    expect(feed?.user).toMatchObject({ id: "user-1" });
+    expect(feed?.plan).toMatchObject({ id: "plan-1" });
+    expect(feed?.sources.inbounds).toHaveLength(1);
+    expect(feed?.sources.nodes).toHaveLength(1);
+    expect(feed?.sources.bindings).toHaveLength(1);
+    expect(feed?.sources.mappings).toEqual([expect.objectContaining({ userId: "user-1" })]);
+    expect(await store.readSubscriptionFeed("hash-missing")).toBeNull();
+  });
+
   it("does not double bill overlapping samples and ignores an older sample", async () => {
     await store.recordTrafficSample(sample(1000, "2026-11-14T12:00:00.000Z"));
     const results = await Promise.all([
