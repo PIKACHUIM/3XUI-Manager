@@ -50,6 +50,36 @@ describe("subscription formats", () => {
     expect(reality?.uri).toContain("pbk=public-key");
     expect(JSON.stringify([vless, vmess, trojan, reality])).not.toMatch(/NEVER-EXPORT|private-panel|admin-secret|admin-password/);
   });
+  it("exports Hysteria2 with the per-client auth token and its Salamander obfs password", async () => {
+    const hysteria = {
+      ...inbound,
+      protocol: "hysteria",
+      port: 61092,
+      config: {
+        settings: { version: 2 },
+        streamSettings: {
+          network: "hysteria",
+          security: "tls",
+          hysteriaSettings: { version: 2, udpIdleTimeout: 60 },
+          tlsSettings: { serverName: "", alpn: ["h3"] },
+          finalmask: { udp: [{ type: "salamander", settings: { password: "obfs-secret" } }] },
+        },
+      },
+    } as Inbound;
+    const entry = await convertSubscriptionEntry(hysteria, node, mapping, key);
+    expect(entry?.clash).toMatchObject({
+      type: "hysteria2", server: "edge.example.com", port: 61092, password: mapping.clientId,
+      "skip-cert-verify": true, obfs: "salamander", "obfs-password": "obfs-secret",
+    });
+    expect(entry?.uri.startsWith(`hysteria2://${mapping.clientId}@edge.example.com:61092?`)).toBe(true);
+    expect(entry?.uri).toContain("obfs=salamander");
+    expect(entry?.uri).toContain("insecure=1");
+    expect(await convertSubscriptionEntry({ ...hysteria, config: { settings: { version: 2 }, streamSettings: { network: "hysteria", security: "tls", hysteriaSettings: { version: 1 } } } }, node, mapping, key)).toBeNull();
+    const { store } = await setup(); await store.put("inbounds", "i", hysteria);
+    const rendered = await renderSubscription(store, user, key, "clash");
+    expect(rendered.body).toContain("type: \"hysteria2\"");
+    expect(rendered.body).toContain("obfs-password: \"obfs-secret\"");
+  });
   it("exports SIP008 only from actual SS client passwords, and rejects unsafe combinations", async () => {
     const ss = { ...inbound, protocol: "shadowsocks", config: { settings: { method: "aes-128-gcm", clients: [{ email: mapping.email, password: "ss-password" }] } } };
     const entry = await convertSubscriptionEntry(ss, node, mapping, key);

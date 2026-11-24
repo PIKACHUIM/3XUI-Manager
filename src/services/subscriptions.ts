@@ -58,13 +58,42 @@ function address(inbound: Inbound, node: NodeRecord): string {
   return shareHost(node.publicAddress);
 }
 interface ProxyEntry { clash: Record<string, unknown>; uri: string; ss?: Record<string, unknown> }
+/**
+ * Hysteria2 authenticates with the per-client `auth` token (the client id this manager mints) and
+ * may wrap the QUIC stream in Salamander obfuscation. Both the Clash entry and the share link must
+ * carry the same token and obfs password, otherwise the handshake fails. Hysteria v1 is a different
+ * transport and is left out rather than emitted as a broken node.
+ */
+function hysteriaEntry(inbound: Inbound, mapping: ClientMapping, name: string, server: string, authority: string): ProxyEntry | null {
+  const stream = object(inbound.config.streamSettings);
+  if (Number(object(stream.hysteriaSettings).version) === 1) return null;
+  const tls = object(stream.tlsSettings);
+  const sni = text(object(tls.settings).serverName) || text(tls.serverName);
+  const masks = Array.isArray(object(stream.finalmask).udp) ? object(stream.finalmask).udp as unknown[] : [];
+  const salamander = masks.map((item) => object(item)).find((item) => item.type === "salamander");
+  const obfsPassword = salamander ? text(object(salamander.settings).password) : "";
+  const password = mapping.clientId;
+  if (!password) return null;
+  // The panel's certificate is issued for its own hostnames, so the node address rarely matches it.
+  const clash: Record<string, unknown> = { name, type: "hysteria2", server, port: inbound.port, password, udp: true, "skip-cert-verify": true };
+  const params = new URLSearchParams({ insecure: "1" });
+  if (sni) { clash.sni = sni; params.set("sni", sni); }
+  if (obfsPassword) {
+    clash.obfs = "salamander";
+    clash["obfs-password"] = obfsPassword;
+    params.set("obfs", "salamander");
+    params.set("obfs-password", obfsPassword);
+  }
+  return { clash, uri: `hysteria2://${encodeURIComponent(password)}@${authority}?${params}#${encodeURIComponent(name)}` };
+}
 export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecord, mapping: ClientMapping, key: string, displayName?: string): Promise<ProxyEntry | null> {
   const server = address(inbound, node);
   if (!server || !Number.isInteger(inbound.port) || inbound.port < 1 || inbound.port > 65535) return null;
   const protocol = inbound.protocol.toLowerCase();
-  if (!["vmess", "vless", "trojan", "shadowsocks", "wireguard"].includes(protocol)) return null;
+  if (!["vmess", "vless", "trojan", "shadowsocks", "wireguard", "hysteria", "hysteria2"].includes(protocol)) return null;
   const name = displayName?.trim() || `${inbound.name} · ${node.name} (${inbound.id}/${node.id})`;
   const authority = `${server.includes(":") ? `[${server}]` : server}:${inbound.port}`;
+  if (protocol === "hysteria" || protocol === "hysteria2") return hysteriaEntry(inbound, mapping, name, server, authority);
   if (protocol === "wireguard") {
     const wg = object(inbound.config.settings);
     const peerPrivateKey = text(mapping.wgPrivateKey);

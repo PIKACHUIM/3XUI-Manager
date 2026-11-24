@@ -11,6 +11,7 @@ import type { RuntimeEnv } from "../env";
 import { runLifecycleMaintenance } from "../services/lifecycle";
 import { runTrafficCollection } from "../services/traffic";
 import { runEntitlementReconciliation } from "../services/xui-reconcile";
+import { runNodeSync } from "../services/xui-node-sync";
 
 api.route("/api/auth", auth);
 api.route("/api/admin", admin);
@@ -45,6 +46,7 @@ export default {
   scheduled(_controller: ScheduledController, env: RuntimeEnv, context: ExecutionContext) {
     const jobs: Array<[string, () => Promise<unknown>]> = [
       ["traffic", () => runTrafficCollection(env)],
+      ["nodes", () => runNodeSync(env)],
       ["lifecycle", () => runLifecycleMaintenance(env)],
       ["reconcile", () => runEntitlementReconciliation(env)],
     ];

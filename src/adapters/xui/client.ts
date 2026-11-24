@@ -161,6 +161,78 @@ export function inboundPayload(inbound: Inbound): Record<string, unknown> {
   };
 }
 
+/** Hysteria authenticates each client with its own `auth` token instead of the shared UUID. */
+function usesAuth(protocol: string): boolean {
+  return protocol === "hysteria" || protocol === "hysteria2";
+}
+
+/** The quota fields this manager keeps in step with the account on every node. */
+export interface ClientQuota {
+  email: string;
+  enable: boolean;
+  totalGB: number;
+  expiryTime: number;
+  limitIp: number;
+  reset: number;
+  flow: string;
+  auth?: string;
+}
+
+/**
+ * Builds the panel client payload from the account. 3X-UI shows the remaining quota as `totalGB`
+ * minus the client's own counter, and that counter survives plan renewals, so when the counter is
+ * known the quota is offset by it: the panel then reports the same remaining traffic the account has.
+ */
+export function clientQuota(mapping: ClientMapping, inbound: Inbound, user: User, panelUsedBytes?: number): ClientQuota {
+  const remaining = Math.max(0, Math.ceil(user.planTrafficBytes - user.billedBytes));
+  const quota: ClientQuota = {
+    email: mapping.email,
+    enable: mapping.enable && user.enabled && remaining > 0,
+    // 3X-UI keeps this legacy "totalGB" field in bytes; the panel subtracts its own counter from it.
+    totalGB: typeof panelUsedBytes === "number" && Number.isSafeInteger(panelUsedBytes) && panelUsedBytes >= 0
+      ? panelUsedBytes + remaining
+      : Math.max(0, Math.ceil(user.planTrafficBytes)),
+    expiryTime: user.planExpiresAt ? Date.parse(user.planExpiresAt) : 0,
+    limitIp: 0,
+    reset: 0,
+    flow: mapping.flow,
+  };
+  // Hysteria has no UUID: the panel authenticates the client with this token, and the subscription
+  // hands the same token to the client as the proxy password.
+  if (usesAuth(inbound.protocol.toLowerCase())) quota.auth = mapping.clientId;
+  return quota;
+}
+
+/** True when a panel client row already carries every quota field this manager owns. */
+export function quotaMatches(panelClient: Record<string, unknown>, quota: ClientQuota): boolean {
+  const totalGB = Number(panelClient.totalGB);
+  const expiryTime = Number(panelClient.expiryTime ?? 0);
+  if (!Number.isFinite(totalGB) || totalGB !== quota.totalGB || expiryTime !== quota.expiryTime) return false;
+  if ((panelClient.enable !== false) !== quota.enable) return false;
+  if (quota.auth === undefined) return true;
+  return typeof panelClient.auth === "string" && panelClient.auth === quota.auth;
+}
+
+/** Panel-side client rows of one inbound, keyed by email; null when the panel does not expose them. */
+export function readPanelClients(inbounds: readonly XuiInbound[], panelInboundId: number): Map<string, Record<string, unknown>> | null {
+  const inbound = inbounds.find((item) => item.id === panelInboundId);
+  if (!inbound) return null;
+  let settings = inbound.settings;
+  if (typeof settings === "string") {
+    try { settings = JSON.parse(settings); } catch { return null; }
+  }
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
+  const clients = (settings as { clients?: unknown }).clients;
+  if (!Array.isArray(clients)) return null;
+  const rows = new Map<string, Record<string, unknown>>();
+  for (const client of clients) {
+    if (!client || typeof client !== "object" || Array.isArray(client)) continue;
+    const email = (client as { email?: unknown }).email;
+    if (typeof email === "string" && email) rows.set(email, client as Record<string, unknown>);
+  }
+  return rows;
+}
+
 export class ThreeXuiClient {
   private readonly origin: URL;
   private cookie: string | null = null;
@@ -390,39 +462,25 @@ export class ThreeXuiClient {
   }
 
   /**
-   * Creates or updates the panel client. 3X-UI shows the remaining quota as `totalGB` minus the
-   * client's own counter, and that counter survives plan renewals, so when the counter is known the
-   * quota is offset by it: the panel then reports the same remaining traffic the account has.
+   * Creates or updates the panel client, keeping quota, expiry, enabled state and the Hysteria
+   * `auth` token equal to the account.
    */
   async upsertClient(mapping: ClientMapping, inbound: Inbound, binding: InboundNodeBinding, user: User, panelUsedBytes?: number): Promise<void> {
     const id = mapping.clientId;
-    const remaining = Math.max(0, Math.ceil(user.planTrafficBytes - user.billedBytes));
-    const enable = mapping.enable && user.enabled && remaining > 0;
-    // 3X-UI keeps this legacy "totalGB" field in bytes; the panel subtracts its own counter from it.
-    const totalGB = typeof panelUsedBytes === "number" && Number.isSafeInteger(panelUsedBytes) && panelUsedBytes >= 0
-      ? panelUsedBytes + remaining
-      : Math.max(0, Math.ceil(user.planTrafficBytes));
-    const quota = {
-      email: mapping.email,
-      enable,
-      totalGB,
-      expiryTime: user.planExpiresAt ? Date.parse(user.planExpiresAt) : 0,
-      limitIp: 0,
-      reset: 0,
-    };
+    const quota = clientQuota(mapping, inbound, user, panelUsedBytes);
     // The panel only exposes the client as a path parameter; `?email=` answers 404 and used to
     // leave every existing client on its creation-time quota.
     try {
       await this.request(`/panel/api/clients/update/${encodeURIComponent(mapping.email)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...quota, flow: mapping.flow }),
+        body: JSON.stringify(quota),
       });
       return;
     } catch (error) {
       if (!(error instanceof Error) || !/(record not found|not found)/i.test(error.message)) throw error;
     }
-    const client: XuiClientData = { id, ...quota, flow: mapping.flow, subId: id.replaceAll("-", "").slice(0, 16) };
+    const client: XuiClientData = { id, ...quota, subId: id.replaceAll("-", "").slice(0, 16) };
     if (inbound.protocol.toLowerCase() === "trojan" && mapping.encryptedSecret && this.env.APP_ENCRYPTION_KEY) {
       client.password = await decryptSecret(mapping.encryptedSecret, this.env.APP_ENCRYPTION_KEY);
     }
@@ -434,10 +492,15 @@ export class ThreeXuiClient {
   }
 
   async disableClient(mapping: ClientMapping): Promise<void> {
-    await this.request(`/panel/api/clients/update/${encodeURIComponent(mapping.email)}`, {
+    await this.disableClientEmail(mapping.email);
+  }
+
+  /** Disables a panel client by email, for clients the account no longer owns. */
+  async disableClientEmail(email: string): Promise<void> {
+    await this.request(`/panel/api/clients/update/${encodeURIComponent(email)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: mapping.email, enable: false }),
+      body: JSON.stringify({ email, enable: false }),
     });
   }
 
