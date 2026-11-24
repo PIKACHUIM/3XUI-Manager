@@ -389,14 +389,23 @@ export class ThreeXuiClient {
     return items;
   }
 
-  async upsertClient(mapping: ClientMapping, inbound: Inbound, binding: InboundNodeBinding, user: User): Promise<void> {
+  /**
+   * Creates or updates the panel client. 3X-UI shows the remaining quota as `totalGB` minus the
+   * client's own counter, and that counter survives plan renewals, so when the counter is known the
+   * quota is offset by it: the panel then reports the same remaining traffic the account has.
+   */
+  async upsertClient(mapping: ClientMapping, inbound: Inbound, binding: InboundNodeBinding, user: User, panelUsedBytes?: number): Promise<void> {
     const id = mapping.clientId;
-    const enable = mapping.enable && user.enabled && user.billedBytes < user.planTrafficBytes;
-    // 3X-UI keeps this legacy "totalGB" field in bytes, so the plan quota is sent as-is.
+    const remaining = Math.max(0, Math.ceil(user.planTrafficBytes - user.billedBytes));
+    const enable = mapping.enable && user.enabled && remaining > 0;
+    // 3X-UI keeps this legacy "totalGB" field in bytes; the panel subtracts its own counter from it.
+    const totalGB = typeof panelUsedBytes === "number" && Number.isSafeInteger(panelUsedBytes) && panelUsedBytes >= 0
+      ? panelUsedBytes + remaining
+      : Math.max(0, Math.ceil(user.planTrafficBytes));
     const quota = {
       email: mapping.email,
       enable,
-      totalGB: Math.max(0, Math.ceil(user.planTrafficBytes)),
+      totalGB,
       expiryTime: user.planExpiresAt ? Date.parse(user.planExpiresAt) : 0,
       limitIp: 0,
       reset: 0,

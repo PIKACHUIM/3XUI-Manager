@@ -159,6 +159,21 @@ describe("runEntitlementReconciliation", () => {
     expect(synced.sort()).toEqual([expired.id, missing.id, partial.id].sort());
   });
 
+  it("keeps staff accounts in step once they own panel clients", async () => {
+    const admin = user("admin-1", { role: "admin" });
+    const idleAdmin = user("admin-2", { role: "admin" });
+    harness.store = new MemoryStore([
+      ["users", admin.id, admin], ["users", idleAdmin.id, idleAdmin],
+      ["inbounds", inbound.id, inbound],
+      ["inbound-node-bindings", "inbound-1:node-1", binding("node-1")],
+      // Stale mapping: the admin's client row is due for the periodic quota refresh.
+      ["clients", `${admin.id}:${inbound.id}`, mapping(admin.id, { updatedAt: now })],
+    ]);
+
+    expect(await runEntitlementReconciliation(env)).toMatchObject({ scanned: 2, due: 1, synced: 1 });
+    expect((harness.sync as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[2])).toEqual([admin.id]);
+  });
+
   it("retires mappings that no longer belong to the user's plan", async () => {
     const owner = user("user-1", { planId: "plan-b" });
     harness.store = new MemoryStore([

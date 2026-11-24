@@ -305,6 +305,24 @@ describe("upsertClient", () => {
     expect(calls.some((call) => call.url.endsWith("/panel/api/clients/add"))).toBe(false);
   });
 
+  it("offsets the quota by the panel counter so the remaining traffic matches the account", async () => {
+    const calls = stubPanel(() => null);
+    const client = await ThreeXuiClient.connect(env, await makeNode());
+    await client.upsertClient(mappingFixture, inboundFixture, bindingFixture, { ...userFixture, billedBytes: 100 }, 500);
+
+    const update = calls.find((call) => call.url.includes("/panel/api/clients/update/"))!;
+    expect(JSON.parse(update.body!)).toMatchObject({ totalGB: 102_400_000_000_400, enable: true });
+  });
+
+  it("disables the client and reports no remaining traffic when the plan is spent", async () => {
+    const calls = stubPanel(() => null);
+    const client = await ThreeXuiClient.connect(env, await makeNode());
+    await client.upsertClient(mappingFixture, inboundFixture, bindingFixture, { ...userFixture, billedBytes: userFixture.planTrafficBytes }, 500);
+
+    const update = calls.find((call) => call.url.includes("/panel/api/clients/update/"))!;
+    expect(JSON.parse(update.body!)).toMatchObject({ totalGB: 500, enable: false });
+  });
+
   it("creates the client when the panel answers record not found", async () => {
     const calls = stubPanel((call) => call.url.includes("/panel/api/clients/update/")
       ? json({ success: false, msg: "Something went wrong (record not found)" })

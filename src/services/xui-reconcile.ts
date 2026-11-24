@@ -65,8 +65,11 @@ export async function runEntitlementReconciliation(env: RuntimeEnv): Promise<Rec
 
     const due: DueUser[] = [];
     for (const user of users) {
-      if (user.role !== "user" || !user.enabled) continue;
+      if (!user.enabled) continue;
       const owned = mappingsByUser.get(user.id) ?? [];
+      // Staff accounts are kept in step once they already own panel clients; a brand-new admin is
+      // still provisioned on sign-in, so cron never creates clients for accounts nobody signed into.
+      if (user.role !== "user" && owned.length === 0) continue;
       const eligible = inbounds.filter((inbound) => servesPlan(inbound, user));
       const expired = Boolean(user.planExpiresAt && Date.parse(user.planExpiresAt) <= now);
       const exhausted = user.planTrafficBytes > 0 && user.billedBytes >= user.planTrafficBytes;

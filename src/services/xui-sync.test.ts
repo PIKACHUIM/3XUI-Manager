@@ -113,6 +113,36 @@ describe("syncClientToNodes", () => {
   });
 });
 
+describe("syncClientToNodes quota", () => {
+  it("reads the panel counter so the panel remaining matches the account remaining", async () => {
+    const enabledNode = { ...node, enabled: true } as NodeRecord;
+    const store = new MemoryStore([
+      ["users", user.id, user], ["inbounds", inbound.id, inbound], ["clients", mapping.id, mapping],
+      ["inbound-node-bindings", binding.id, binding], ["nodes", enabledNode.id, enabledNode],
+    ]);
+    const upsertClient = vi.fn();
+    const fake = {
+      listInbounds: vi.fn(async () => [{
+        id: 1, protocol: "vless", settings: "{}", streamSettings: "{}", sniffing: "{}",
+        clientStats: [{ email: mapping.email, up: 400, down: 100 }],
+      }]),
+      readClientUsage: ThreeXuiClient.prototype.readClientUsage,
+      upsertClient,
+    } as unknown as ThreeXuiClient;
+    const connect = vi.spyOn(ThreeXuiClient, "connect").mockResolvedValue(fake);
+    try {
+      await syncClientToNodes(store, {} as never, mapping);
+    } finally {
+      connect.mockRestore();
+    }
+
+    const call = upsertClient.mock.calls[0]!;
+    expect(call[0]).toMatchObject({ id: mapping.id });
+    expect(call[1]).toMatchObject({ id: inbound.id });
+    expect(call[4]).toBe(500);
+  });
+});
+
 describe("syncClientToNodes with WireGuard", () => {
   const wgInbound: Inbound = {
     ...inbound, id: "inbound-wg", name: "wg", protocol: "wireguard", port: 51820, network: "udp",

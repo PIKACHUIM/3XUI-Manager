@@ -24,6 +24,18 @@ export interface SyncResult {
   errors: Array<{ nodeId: string; message: string }>;
 }
 
+/**
+ * The panel counter behind a client's "used traffic", so the quota pushed back can be offset by it.
+ * A missing or malformed counter only costs the offset, never the client update itself.
+ */
+async function panelUsage(client: ThreeXuiClient, binding: InboundNodeBinding, email: string): Promise<number | undefined> {
+  try {
+    return client.readClientUsage(await client.listInbounds(), binding.panelInboundId).get(email);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function syncUserEntitlements(store: DocumentStore, env: RuntimeEnv, userId: string): Promise<SyncResult> {
   const user = await store.get<User>("users", userId);
   if (!user) throw new Error("User not found.");
@@ -90,7 +102,7 @@ export async function syncUserEntitlements(store: DocumentStore, env: RuntimeEnv
           // WireGuard has no per-client records: the account owns one peer with its own key pair.
           if (binding) await syncWireGuardPeer(store, client, mapping, inbound, nodeId, binding.panelInboundId, eligible);
         } else if (!eligible) await client.disableClient(mapping);
-        else if (binding) await client.upsertClient(mapping, inbound, binding, user);
+        else if (binding) await client.upsertClient(mapping, inbound, binding, user, await panelUsage(client, binding, mapping.email));
         nodeResults.push(nodeId);
         inboundSuccess += 1;
         success += 1;
@@ -136,7 +148,7 @@ export async function syncClientToNodes(store: DocumentStore, env: RuntimeEnv, m
       if (inbound.protocol.toLowerCase() === "wireguard") {
         await syncWireGuardPeer(store, client, mapping, inbound, binding.nodeId, binding.panelInboundId, mapping.enable && user.enabled && hasTraffic);
       } else if (!mapping.enable || !user.enabled || !hasTraffic) await client.disableClient(mapping);
-      else await client.upsertClient(mapping, inbound, binding, user);
+      else await client.upsertClient(mapping, inbound, binding, user, await panelUsage(client, binding, mapping.email));
       syncedNodes.push(node.id);
       success += 1;
     } catch (error) {
