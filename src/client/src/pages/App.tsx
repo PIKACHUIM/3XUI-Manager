@@ -59,7 +59,7 @@ type AdminOrderRecord = UserOrderData & { userId: string; paidAt: string | null 
 type AdminUserRow = { id: string; name: string; email: string; initials: string; color: string; role: string; plan: string; usage: string; date: string; state: string; enabled: boolean };
 type DisplayOrderRow = { id: string; customer: string; email: string; plan: string; amount: string; method: string; date: string; state: string };
 type DisplayPlanRow = { id: string; name: string; detail: string; level: string; traffic: string; price: string; cycle: string; users: string; tone: string; enabled: boolean; hidden: boolean };
-type DisplayInboundRow = { id: string; name: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean; plans: string };
+type DisplayInboundRow = { id: string; name: string; address: string; node: string; level: string; multiplier: string; clients: string; state: string; enabled: boolean; planEnabled: boolean; plans: string[] };
 type UserOverviewData = {
   user: AuthenticatedUser & { balanceMinor: number; planLevel: number; planExpiresAt: string | null; createdAt: string; checkinStreak: number; lastCheckinAt: string | null };
   plan: ApiPlan | null;
@@ -618,7 +618,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         state: inbound.enabled ? "active" : "disabled",
         enabled: inbound.enabled,
         planEnabled: inbound.planEnabled !== false,
-        plans: (inbound.planIds ?? []).map((planId) => adminPlans.find((plan) => plan.id === planId)?.name ?? planId).join(", "),
+        plans: (inbound.planIds ?? []).map((planId) => adminPlans.find((plan) => plan.id === planId)?.name ?? planId),
       };
     });
   }, [adminInbounds, adminBindings, adminInboundStats, adminNodes, adminPlans]);
@@ -1822,7 +1822,7 @@ function InboundsPage({ t, locale, rows, onEdit, onToggle, onSync, onResync, onD
           {rows.map((row) => <tr key={row.id}>
             <td className="cell-title"><div className="table-person"><span className="inbound-symbol"><Network size={16} /></span><span><b>{row.name}</b><small>{row.address}</small></span></div></td>
             <td data-label={t("nodes")}>{row.node}</td>
-            <td data-label={t("level")}><span className="role-chip">{row.level}</span>{row.plans && <span className="role-chip">{row.plans}</span>}{!row.planEnabled && <span className="role-chip">{say(locale, "未对套餐启用", "No plan")}</span>}</td>
+            <td data-label={t("level")}><div className="tag-list"><span className="tag tag-level">{row.level}</span>{row.plans.map((plan, index) => <span className="tag" key={`${plan}-${index}`}>{plan}</span>)}{!row.planEnabled && <span className="tag tag-muted">{say(locale, "未对套餐启用", "No plan")}</span>}</div></td>
             <td data-label={t("multiplierLabel")}><span className="multiplier-chip"><Zap size={12} />{row.multiplier}</span></td>
             <td data-label={t("clientCount")}>{row.clients}</td>
             <td data-label={t("status")}><span className={`status-chip ${row.enabled ? "" : "pending"}`}><i />{row.enabled ? t("enabled") : t("disabled")}</span></td>
