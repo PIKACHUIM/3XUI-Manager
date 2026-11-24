@@ -10,7 +10,7 @@ import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
 import { detectLocale, EN_MESSAGES, LOCALE_META, LOCALES, localeDirection, messages, phrase, pick, saveLocale, say, type Locale, type MessageKey } from "../lib/i18n";
-import { autoInboundTag, buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, jsonObject, kcpHeaderTypes, localDateTime, maskRows, maskRowsJson, plainObject, quicBbrProfiles, quicCongestions, tcpMaskPresets, tcpMaskTypes, tlsVersions, trafficResetUnits, udpMaskTypes, xdriveServices, xhttpModes, type MaskRow } from "../lib/inbound-config";
+import { autoInboundTag, buildInboundConfig, buildInboundMeta, certificateUsages, domainStrategies, inboundFieldValues, inboundNetworks, inboundProtocols, inboundSniffTargets, kcpHeaderTypes, maskRows, maskRowsJson, quicBbrProfiles, quicCongestions, tcpMaskPresets, tcpMaskTypes, tlsVersions, trafficResetUnits, udpMaskTypes, xdriveServices, xhttpModes, type MaskRow } from "../lib/inbound-config";
 
 import { HelpPage } from "./HelpPage";
 import { SubscriptionLinks, type SubscriptionLinksData } from "./SubscriptionLinks";
@@ -925,7 +925,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
 type TextFn = (key: MessageKey) => string;
 
 /** Tabs of the inbound dialog, mirroring the 3X-UI inbound form plus our plan binding. */
-type InboundTabKey = "basic" | "protocol" | "stream" | "security" | "sniffing" | "plans" | "advanced";
+type InboundTabKey = "basic" | "protocol" | "stream" | "security" | "sniffing" | "advanced";
 
 /** Defaults for the complete 3X-UI inbound field set rendered by the admin form. */
 const inboundDefaults: Record<string, string | boolean> = {  protocol: "vless", network: "tcp", port: "443", listen: "", minimumLevel: "0", multiplier: "1", security: "none",
@@ -1010,70 +1010,6 @@ const inboundJsonFields: Array<[string, "object" | "array"]> = [
   ["streamExtra", "object"], ["sniffExtra", "object"],
 ];
 
-/** One editable client of the inbound, mirroring a 3X-UI client entry. */
-type InboundClientDraft = {
-  key: string;
-  id: string;
-  email: string;
-  password: string;
-  flow: string;
-  limitIp: string;
-  totalGb: string;
-  expiry: string;
-  subId: string;
-  reset: string;
-  enable: boolean;
-  raw: Record<string, unknown>;
-};
-
-const inboundClientProtocols = ["vless", "vmess", "trojan", "shadowsocks"] as const;
-
-function randomClientSecret(length = 18): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  return Array.from(bytes, (value) => (value % 36).toString(36)).join("");
-}
-
-function inboundClientDrafts(record?: AdminInboundRecord): InboundClientDraft[] {
-  const settings = plainObject(record ? jsonObject(record.config).settings : {});
-  const source = Array.isArray(settings.clients) ? settings.clients : [];
-  return source
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
-    .map((entry, index) => ({
-      key: `${String(entry.id ?? entry.email ?? "client")}-${index}`,
-      id: typeof entry.id === "string" ? entry.id : "",
-      email: typeof entry.email === "string" ? entry.email : "",
-      password: typeof entry.password === "string" ? entry.password : "",
-      flow: typeof entry.flow === "string" ? entry.flow : "",
-      limitIp: String(entry.limitIp ?? 0),
-      totalGb: Number(entry.totalGB) > 0 ? String(Number(entry.totalGB) / 1_000_000_000) : "0",
-      expiry: localDateTime(Number(entry.expiryTime ?? 0)),
-      subId: typeof entry.subId === "string" ? entry.subId : "",
-      reset: String(entry.reset ?? 0),
-      enable: entry.enable !== false,
-      raw: entry,
-    }));
-}
-
-/** Writes the edited client back into a 3X-UI client object, keeping unknown keys. */
-function clientDraftPayload(draft: InboundClientDraft, protocol: string): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...draft.raw };
-  next.email = draft.email.trim();
-  if (protocol === "vless" || protocol === "vmess") next.id = draft.id.trim();
-  else delete next.id;
-  if (protocol === "trojan" || protocol === "shadowsocks") next.password = draft.password;
-  else delete next.password;
-  if (protocol === "vless") next.flow = draft.flow;
-  else delete next.flow;
-  next.limitIp = Math.max(0, Math.round(Number(draft.limitIp) || 0));
-  next.totalGB = Math.max(0, Math.round((Number(draft.totalGb) || 0) * 1_000_000_000));
-  next.expiryTime = draft.expiry ? Date.parse(draft.expiry) || 0 : 0;
-  next.enable = draft.enable;
-  next.subId = draft.subId.trim();
-  next.reset = Math.max(0, Math.round(Number(draft.reset) || 0));
-  return next;
-}
-
-
 function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, onCancel, onSubmit }: { kind: AdminCreateKind; initial?: ApiPlan | AdminNodeRecord | AdminInboundRecord | AdminUserRecord; nodes: AdminNodeRecord[]; plans: ApiPlan[]; bindings?: AdminInboundBinding[]; locale: Locale; onCancel: () => void; onSubmit: (body: Record<string, unknown>) => Promise<void> }) {
   const [fields, setFields] = useState<Record<string, string | boolean>>(() => {
     const defaults: Record<string, string | boolean> = {
@@ -1099,7 +1035,6 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     return { ...defaults, email: user.email, role: user.role, enabled: user.enabled, planExpiresAt: localExpiration };
   });
   const [nodeIds, setNodeIds] = useState<string[]>(() => initial && kind === "inbound" ? bindings.filter((binding) => binding.inboundId === initial.id).map((binding) => binding.nodeId) : kind === "inbound" && nodes.length ? [nodes[0].id] : []);
-  const [clients, setClients] = useState<InboundClientDraft[]>(() => (kind === "inbound" ? inboundClientDrafts(initial as AdminInboundRecord | undefined) : []));
   const [inboundTab, setInboundTab] = useState<InboundTabKey>("basic");
   const [inboundAdvancedTab, setInboundAdvancedTab] = useState<"all" | "settings" | "stream" | "sniffing">("all");
   const [vlessKeyKind, setVlessKeyKind] = useState<string>("mlkem768");
@@ -1115,7 +1050,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   const text = (zh: string, en: string) => say(locale, zh, en);
   const inboundTabItems: Array<[InboundTabKey, string]> = [
     ["basic", text("基础配置", "Basics")], ["protocol", text("协议", "Protocol")], ["stream", text("传输", "Transport")],
-    ["security", text("安全", "Security")], ["sniffing", text("嗅探", "Sniffing")], ["plans", text("套餐", "Plans")], ["advanced", text("高级配置", "Advanced")],
+    ["security", text("安全", "Security")], ["sniffing", text("嗅探", "Sniffing")], ["advanced", text("高级配置", "Advanced")],
   ];
   const fallbackParse = parseFallbackRows(String(fields.protocolFallbacks ?? ""));
   const tcpMaskParse = maskRows(fields.tcpMasks);
@@ -1142,22 +1077,6 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
   const areaField = (name: string, label: string, props: React.TextareaHTMLAttributes<HTMLTextAreaElement> = {}) => <label className="admin-form-wide"><span>{label}</span><textarea rows={3} {...props} value={String(fields[name] ?? "")} onChange={(event) => setFields((current) => ({ ...current, [name]: event.target.value }))} /></label>;
   const checkListField = (name: string, values: readonly string[], label: string) => <fieldset className="admin-node-options"><legend>{label}</legend>{values.map((value) => <label key={value}><input type="checkbox" checked={String(fields[name] ?? "").split(",").includes(value)} onChange={toggleListField(name, value)} /><span>{value.toUpperCase()}</span></label>)}</fieldset>;
   const formSection = (title: string, body: React.ReactNode) => <section className="admin-form-block"><h3>{title}</h3><div className="admin-form-grid two-col">{body}</div></section>;
-  const updateClient = (key: string, patch: Partial<InboundClientDraft>) => setClients((current) => current.map((client) => (client.key === key ? { ...client, ...patch } : client)));
-  const addClient = () => setClients((current) => [...current, {
-    key: `client-${Date.now()}-${current.length}`,
-    id: crypto.randomUUID(),
-    email: `client_${randomClientSecret(6)}`,
-    password: randomClientSecret(),
-    flow: "",
-    limitIp: "0",
-    totalGb: "0",
-    expiry: "",
-    subId: randomClientSecret(16),
-    reset: "0",
-    enable: true,
-    raw: {},
-  }]);
-  const removeClient = (key: string) => setClients((current) => current.filter((client) => client.key !== key));
   const setFallbackRows = (rows: Array<Record<string, unknown>>) => setFields((current) => ({ ...current, protocolFallbacks: rows.length ? JSON.stringify(rows) : "" }));
   const patchFallback = (index: number, patch: Record<string, unknown>) => setFallbackRows(fallbackParse.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   const appendFallback = () => setFallbackRows([...fallbackParse.rows, { name: "", alpn: "", path: "", dest: "", xver: 0 }]);
@@ -1261,14 +1180,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
             throw new Error(`${jsonSection(name)} · ${text("以下字段必须是合法 JSON：", "This field must contain valid JSON: ")}${name}`);
           }
         }
-        if ((inboundClientProtocols as readonly string[]).includes(String(fields.protocol))) {
-          const emails = clients.map((client) => client.email.trim());
-          if (emails.some((email) => !email)) { setInboundTab("protocol"); throw new Error(text("每个客户端都需要填写邮箱。", "Every client needs an email address.")); }
-          const duplicate = emails.find((email, index) => emails.indexOf(email) !== index);
-          if (duplicate) { setInboundTab("protocol"); throw new Error(`${text("客户端邮箱不能重复：", "Duplicate client email: ")}${duplicate}`); }
-        }
-        const clientPayload = clients.map((draft) => clientDraftPayload(draft, String(fields.protocol)));
-        body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, planIds: String(fields.planIds ?? "").split(",").filter(Boolean), enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig({ ...fields, clients: JSON.stringify(clientPayload) }), ...(!initial ? { nodeIds } : {}) };
+        body = { name: String(fields.name).trim(), protocol: fields.protocol, network: fields.network, port, minimumLevel: Number(fields.minimumLevel), multiplier: Number(fields.multiplier), planEnabled: fields.planEnabled === true, planIds: String(fields.planIds ?? "").split(",").filter(Boolean), enabled: fields.enabled === true, ...buildInboundMeta(fields), config: buildInboundConfig(fields), ...(!initial ? { nodeIds } : {}) };
       } else if (initial) {
         body = { role: fields.role, enabled: fields.enabled === true, planExpiresAt: fields.planExpiresAt ? new Date(String(fields.planExpiresAt)).toISOString() : null };
       } else {
@@ -1336,6 +1248,24 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
     </>}
         {kind === "inbound" && <div className="inbound-editor">
           <div className="inbound-editor-main">
+            <div className="inbound-plans">
+              {formSection(text("套餐与分配", "Plans and access"), <>
+                {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
+                {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
+                {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
+              </>)}
+              <fieldset className="admin-node-options">
+                <legend>{text("绑定套餐（可多选）", "Bound plans (multi-select)")}</legend>
+                {plans.map((plan) => (
+                  <label key={plan.id}>
+                    <input type="checkbox" checked={String(fields.planIds ?? "").split(",").includes(plan.id)} onChange={toggleListField("planIds", plan.id)} />
+                    <span>{plan.name} · {text(`等级 ${plan.level}`, `Level ${plan.level}`)}{plan.enabled ? "" : ` · ${text("已停用", "disabled")}`}</span>
+                  </label>
+                ))}
+                {!plans.length && <span className="admin-form-note">{text("还没有套餐，先到套餐页创建。", "No plans yet — create one on the plans page.")}</span>}
+              </fieldset>
+              <div className="admin-form-note">{text("勾选套餐后，入站只对这些套餐的用户下发客户端；不勾选则回落到「最低套餐等级」。同一入站可绑多个套餐，也可是多个入站的成员，用户在主套餐对应的入站-节点上拿到同一套客户端。保存后会立即为现有用户下发并重同步。", "Once plans are picked, the inbound provisions clients only for those plans; leave empty to fall back to the minimum plan level. One inbound can serve several plans and several inbounds can serve the same plan — a user receives the same client on every inbound-node pair of their current plan. Saving provisions and resyncs existing users right away.")}</div>
+            </div>
             <div className="inbound-tabs" role="tablist" aria-label={text("入站设置分区", "Inbound settings sections")}>
               {inboundTabItems.filter(([key]) => (key !== "protocol" || protocolTabVisible) && (key !== "security" || securityTabVisible)).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={inboundTab === key} className={inboundTab === key ? "active" : ""} onClick={() => setInboundTab(key)}>{label}</button>)}
             </div>
@@ -1365,7 +1295,7 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
 
             <div className="admin-form-tabpanel" hidden={inboundTab !== "protocol"}>
             {formSection(text("协议设置", "Protocol settings"), <>
-              {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 的客户端在右侧列表中维护，协议本身没有额外参数。", "VMess clients live in the client list on the right; the protocol itself has no extra options.")}</div>}
+              {fields.protocol === "vmess" && <div className="admin-form-wide admin-form-note">{text("VMess 的客户端由套餐同步自动生成，协议本身没有额外参数。", "VMess clients are provisioned by plans; the protocol itself has no extra options.")}</div>}
               {fields.protocol === "vless" && <>{selectField("clientFlow", text("客户端 Flow 默认值", "Default client flow"), [["", text("无", "None")], ["xtls-rprx-vision", "xtls-rprx-vision"], ["xtls-rprx-vision-udp443", "xtls-rprx-vision-udp443"]])}{field("vlessDecryption", text("解密（decryption）", "Decryption"), { placeholder: "none" })}{field("vlessEncryption", text("加密（encryption）", "Encryption"), { placeholder: "none" })}<div className="admin-form-wide vless-keygen"><span>{text("生成密钥", "Generate keys")}</span><div className="vless-keygen-row"><select aria-label={text("密钥类型", "Key type")} value={vlessKeyKind} onChange={(event) => setVlessKeyKind(event.target.value)}>{vlessAuthKinds.map((value) => <option key={value} value={value}>{value}</option>)}</select><button className="outline-button" type="button" disabled={vlessKeyBusy} onClick={() => { void generateVlessKeys(); }}>{vlessKeyBusy ? text("生成中…", "Generating…") : text("生成", "Generate")}</button><button className="outline-button" type="button" onClick={() => setFields((current) => ({ ...current, vlessDecryption: "none", vlessEncryption: "none" }))}>{text("清除", "Clear")}</button></div><small>{text("密钥取自面板 /panel/api/server/getNewVlessEnc，等同于 3X-UI 的「生成密钥」。", "Keys come from the panel endpoint behind 3X-UI's Generate keys button.")}</small></div></>}
               {fields.protocol === "shadowsocks" && <>{selectField("ssMethod", text("加密方式", "Cipher"), [["2022-blake3-aes-128-gcm", "2022-blake3-aes-128-gcm"], ["2022-blake3-aes-256-gcm", "2022-blake3-aes-256-gcm"], ["2022-blake3-chacha20-poly1305", "2022-blake3-chacha20-poly1305"], ["aes-128-gcm", "aes-128-gcm"], ["aes-256-gcm", "aes-256-gcm"], ["chacha20-poly1305", "chacha20-poly1305"], ["xchacha20-poly1305", "xchacha20-poly1305"], ["none", text("无", "None")]])}{field("ssPassword", text("入站密码", "Inbound password"))}{field("ssNetwork", text("网络（tcp,udp）", "Network (tcp,udp)"))}</>}
               {fields.protocol === "dokodemo-door" && <>{field("dokodemoAddress", text("目标地址", "Destination address"), { placeholder: "1.1.1.1" })}{field("dokodemoPort", text("目标端口", "Destination port"), { type: "number", min: 0, max: 65535, step: 1 })}{selectField("dokodemoNetwork", text("网络", "Network"), [["tcp", "TCP"], ["udp", "UDP"], ["tcp,udp", "TCP+UDP"]])}{checkField("dokodemoFollowRedirect", text("跟随原始目标地址", "Follow redirect"))}{field("dokodemoTimeout", text("超时（秒）", "Timeout (seconds)"), { type: "number", min: 0, step: 1 })}</>}
@@ -1488,25 +1418,6 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
             </>)}
             </div>
 
-            <div className="admin-form-tabpanel" hidden={inboundTab !== "plans"}>
-              {formSection(text("套餐与分配", "Plans and access"), <>
-                {checkField("planEnabled", text("对套餐启用（为符合条件的用户创建客户端）", "Provision for plans (create clients for eligible users)"))}
-                {field("minimumLevel", text("最低套餐等级", "Minimum plan level"), { type: "number", min: 0, step: 1, required: true })}
-                {field("multiplier", text("流量倍率", "Traffic multiplier"), { type: "number", min: 0, max: 100, step: 0.1, required: true })}
-              </>)}
-              <fieldset className="admin-node-options">
-                <legend>{text("绑定套餐（可多选）", "Bound plans (multi-select)")}</legend>
-                {plans.map((plan) => (
-                  <label key={plan.id}>
-                    <input type="checkbox" checked={String(fields.planIds ?? "").split(",").includes(plan.id)} onChange={toggleListField("planIds", plan.id)} />
-                    <span>{plan.name} · {text(`等级 ${plan.level}`, `Level ${plan.level}`)}{plan.enabled ? "" : ` · ${text("已停用", "disabled")}`}</span>
-                  </label>
-                ))}
-                {!plans.length && <span className="admin-form-note">{text("还没有套餐，先到套餐页创建。", "No plans yet — create one on the plans page.")}</span>}
-              </fieldset>
-              <div className="admin-form-note">{text("勾选套餐后，入站只对这些套餐的用户下发客户端；不勾选则回落到「最低套餐等级」。同一入站可绑多个套餐，也可是多个入站的成员，用户在主套餐对应的入站-节点上拿到同一套客户端。保存后会立即为现有用户下发并重同步。", "Once plans are picked, the inbound provisions clients only for those plans; leave empty to fall back to the minimum plan level. One inbound can serve several plans and several inbounds can serve the same plan — a user receives the same client on every inbound-node pair of their current plan. Saving provisions and resyncs existing users right away.")}</div>
-            </div>
-
             <div className="admin-form-tabpanel" hidden={inboundTab !== "advanced"}>
               <div className="inbound-subtabs" role="tablist" aria-label={text("原始 JSON 分区", "Raw JSON sections")}>
                 {(["all", "settings", "stream", "sniffing"] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={inboundAdvancedTab === key} className={inboundAdvancedTab === key ? "active" : ""} onClick={() => setInboundAdvancedTab(key)}>{key === "all" ? text("全部", "All") : key === "settings" ? text("设置", "Settings") : key === "stream" ? text("传输", "Stream") : text("嗅探", "Sniffing")}</button>)}
@@ -1538,36 +1449,6 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
             </div>
           </div>
 
-          <aside className="inbound-clients" aria-label={text("客户端", "Clients")}>
-            <div className="inbound-clients-head">
-              <div>
-                <h3>{text("客户端", "Clients")} <b>{clients.length}</b></h3>
-                <p>{text("与面板一致：每个客户端独立邮箱、限额与到期时间。", "Same as the panel: each client has its own email, quota and expiry.")}</p>
-              </div>
-              <button className="outline-button small" type="button" onClick={addClient}><Plus size={13} /> {text("添加", "Add")}</button>
-            </div>
-            {(inboundClientProtocols as readonly string[]).includes(String(fields.protocol)) ? <>
-              {clients.length === 0 && <div className="inbound-clients-empty">{text("还没有客户端。点「添加」新建；套餐同步生成时也会自动出现在这里。", "No clients yet. Use Add, or wait for plan provisioning to create them.")}</div>}
-              {clients.map((client) => <article className="inbound-client" key={client.key}>
-                <div className="inbound-client-head">
-                  <input aria-label={text("客户端邮箱", "Client email")} value={client.email} placeholder="client@example.com" onChange={(event) => updateClient(client.key, { email: event.target.value })} />
-                  <label className="admin-form-check"><input type="checkbox" checked={client.enable} onChange={(event) => updateClient(client.key, { enable: event.target.checked })} /><span>{text("启用", "On")}</span></label>
-                  <button className="quiet-icon danger" type="button" aria-label={text("删除客户端", "Delete client")} onClick={() => removeClient(client.key)}><Trash2 size={14} /></button>
-                </div>
-                <div className="inbound-client-grid">
-                  {(fields.protocol === "vless" || fields.protocol === "vmess") && <label className="inbound-client-wide"><span>ID</span><div className="inbound-client-inline"><input value={client.id} onChange={(event) => updateClient(client.key, { id: event.target.value })} /><button className="outline-button small" type="button" onClick={() => updateClient(client.key, { id: crypto.randomUUID() })}>{text("生成", "New")}</button></div></label>}
-                  {(fields.protocol === "trojan" || fields.protocol === "shadowsocks") && <label className="inbound-client-wide"><span>{text("密码", "Password")}</span><div className="inbound-client-inline"><input value={client.password} onChange={(event) => updateClient(client.key, { password: event.target.value })} /><button className="outline-button small" type="button" onClick={() => updateClient(client.key, { password: randomClientSecret() })}>{text("生成", "New")}</button></div></label>}
-                  {fields.protocol === "vless" && <label><span>Flow</span><select value={client.flow} onChange={(event) => updateClient(client.key, { flow: event.target.value })}><option value="">{text("无", "None")}</option><option value="xtls-rprx-vision">xtls-rprx-vision</option><option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option></select></label>}
-                  <label><span>{text("限制 IP", "Limit IP")}</span><input type="number" min={0} step={1} value={client.limitIp} onChange={(event) => updateClient(client.key, { limitIp: event.target.value })} /></label>
-                  <label><span>{text("总流量（GB）", "Total (GB)")}</span><input type="number" min={0} step={0.001} value={client.totalGb} onChange={(event) => updateClient(client.key, { totalGb: event.target.value })} /></label>
-                  <label className="inbound-client-wide"><span>{text("到期时间", "Expiry")}</span><input type="datetime-local" value={client.expiry} onChange={(event) => updateClient(client.key, { expiry: event.target.value })} /></label>
-                  <label><span>{text("重置周期（天）", "Reset (days)")}</span><input type="number" min={0} step={1} value={client.reset} onChange={(event) => updateClient(client.key, { reset: event.target.value })} /></label>
-                  <label><span>Sub ID</span><input value={client.subId} onChange={(event) => updateClient(client.key, { subId: event.target.value })} /></label>
-                </div>
-              </article>)}
-              <p className="inbound-clients-note">{text("套餐同步生成的客户端邮箱形如 u_<用户ID>_<入站ID>，由系统按套餐续期覆盖；手工改动会在下次同步时恢复。", "Plan-managed clients use emails like u_<user>_<inbound> and are rewritten on each sync; manual edits to them are overwritten.")}</p>
-            </> : <div className="inbound-clients-empty">{text("该协议不使用客户端列表，账户/密码在左侧「协议设置」中维护。", "This protocol does not use a client list; accounts are configured under Protocol settings.")}</div>}
-          </aside>
         </div>}
     {kind === "user" && (initial ? <>
       {formSection(text("账户信息", "Account"), <>
