@@ -47,7 +47,11 @@ function HeaderIcon({ icon: Icon, label, onClick }: { icon: LucideIcon; label: s
 type AdminCreateKind = "node" | "inbound" | "plan" | "user";
 type AdminEditor = { kind: AdminCreateKind; id?: string };
 type AuthenticatedUser = { id: string; email: string; role: "admin" | "user"; createdAt: string };
-type PublicConfig = { turnstileSiteKey: string | null; registrationTurnstileEnabled: boolean; checkinTurnstileEnabled: boolean };
+type PublicConfig = { siteTitle: string; turnstileSiteKey: string | null; registrationTurnstileEnabled: boolean; checkinTurnstileEnabled: boolean };
+/** The server owns the title; the fallback only covers the moment before the config arrives. */
+function siteTitleOf(config: PublicConfig | null): string {
+  return config?.siteTitle?.trim() || "3XUI Manager";
+}
 type ApiPlan = { id: string; name: string; description: string; group: string; level: number; trafficBytes: number; validityDays: number; priceMinor: number; currency: string; resetUnit: string; resetInterval: number; resetAtHour: number; resetWeekday: number; resetMonthDay: number; enabled: boolean; isDefault: boolean; allowPaidUpgrade: boolean; hidden?: boolean };
 type AdminDashboardData = { users: number; activeUsers: number; activeSubscriptions: number; revenueMinor: number; currency: string; nodesOnline: number; nodesTotal: number; plans: number; pendingOrders: number };
 type AdminUserRecord = { id: string; email: string; role: "admin" | "user"; enabled: boolean; balanceMinor: number; planId: string; planExpiresAt: string | null; planTrafficBytes: number; billedBytes: number; createdAt: string };
@@ -291,7 +295,7 @@ function TurnstileWidget({ siteKey, action, resetKey, onToken, locale }: { siteK
   return <div className="turnstile-field"><div ref={containerRef} />{error && <div className="auth-message error" role="alert">{error}</div>}</div>;
 }
 
-function AuthScreen({ onAuthenticated, initialError, turnstileSiteKey, turnstileRequired, securityConfigLoaded, securityConfigError }: { onAuthenticated: (user: AuthenticatedUser) => void; initialError: string; turnstileSiteKey: string | null; turnstileRequired: boolean; securityConfigLoaded: boolean; securityConfigError: string }) {
+function AuthScreen({ siteTitle, onAuthenticated, initialError, turnstileSiteKey, turnstileRequired, securityConfigLoaded, securityConfigError }: { siteTitle: string; onAuthenticated: (user: AuthenticatedUser) => void; initialError: string; turnstileSiteKey: string | null; turnstileRequired: boolean; securityConfigLoaded: boolean; securityConfigError: string }) {
   const locale = detectLocale();
   const authTheme = detectTheme();
   const [mode, setMode] = useState<"login" | "register" | "bootstrap">("login");
@@ -348,7 +352,7 @@ function AuthScreen({ onAuthenticated, initialError, turnstileSiteKey, turnstile
   };
 
   const title = mode === "bootstrap" ? say(locale, "创建管理员", "Create administrator") : mode === "register" ? say(locale, "创建你的账号", "Create your account") : say(locale, "欢迎回来", "Welcome back");
-  return <main className={`auth-shell ${authTheme}`}><section className="auth-card"><div className="brand-mark"><span /><span /><span /></div><div className="auth-brand"><strong>3xui<span>.</span></strong><small>MANAGER</small></div><span className="section-kicker">{mode === "bootstrap" ? say(locale, "首次设置", "First-time setup") : mode === "register" ? say(locale, "创建账号", "Create account") : say(locale, "账号登录", "Account sign-in")}</span><h1>{title}</h1>
+  return <main className={`auth-shell ${authTheme}`}><section className="auth-card"><img className="brand-icon" src="/favicon.svg" alt="" width={25} height={25} /><div className="auth-brand"><strong title={siteTitle}>{siteTitle}</strong></div><span className="section-kicker">{mode === "bootstrap" ? say(locale, "首次设置", "First-time setup") : mode === "register" ? say(locale, "创建账号", "Create account") : say(locale, "账号登录", "Account sign-in")}</span><h1>{title}</h1>
     <form className="auth-form" onSubmit={submit}><label>{mode === "login" ? say(locale, "邮箱或用户名", "Email or username") : say(locale, "邮箱地址", "Email address")}<input type={mode === "login" ? "text" : "email"} autoComplete={mode === "login" ? "username" : "email"} value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={254} /></label><label>{say(locale, "密码", "Password")}<input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={mode === "login" ? 1 : 12} maxLength={256} /></label>{mode === "register" && <label>{say(locale, "邀请码", "Invitation code")} <span className="auth-optional">{say(locale, "选填", "optional")}</span><input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} maxLength={100} /></label>}{mode === "bootstrap" && <label>{say(locale, "管理员初始化令牌", "Administrator bootstrap token")}<input type="password" value={bootstrapToken} onChange={(event) => setBootstrapToken(event.target.value)} required autoComplete="off" /></label>}{mode === "register" && turnstileRequired && turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} action="signup" resetKey={turnstileResetKey} onToken={setTurnstileToken} locale={locale} />}{mode === "register" && turnstileRequired && !turnstileSiteKey && securityConfigLoaded && <div className="auth-message error" role="alert">{say(locale, "需要人机验证，但尚未配置 Site Key。", "Turnstile is required but no site key is configured.")}</div>}{error && <div className="auth-message error" role="alert">{error}</div>}{message && <div className="auth-message" role="status">{message}</div>}<button className="primary-button auth-submit" disabled={busy}>{busy ? say(locale, "请稍候…", "Please wait…") : mode === "bootstrap" ? say(locale, "创建管理员", "Create administrator") : mode === "register" ? say(locale, "创建账号", "Create account") : say(locale, "登录", "Sign in")}</button></form>
     <div className="auth-switches">{mode !== "login" && <button type="button" onClick={() => { setMode("login"); setError(""); setMessage(""); }}>{say(locale, "登录", "Sign in")}</button>}{mode !== "register" && <button type="button" onClick={() => { setMode("register"); setError(""); setMessage(""); }}>{say(locale, "创建账号", "Create account")}</button>}{mode !== "bootstrap" && <button type="button" onClick={() => { setMode("bootstrap"); setError(""); setMessage(""); }}>{say(locale, "首次管理员初始化", "First-time admin setup")}</button>}</div>
   </section><span className="auth-foot">{say(locale, "凭据由 HttpOnly 会话 Cookie 保护。", "Credentials are protected by an HttpOnly session cookie.")}</span></main>;
@@ -386,8 +390,10 @@ function App() {
     try { await apiRequest("/api/auth/logout", { method: "POST" }); } catch { /* Session state is cleared locally even if the API is unreachable. */ }
     setSessionUser(null);
   };
-  if (loading) return <main className={`auth-shell ${detectTheme()}`}><section className="auth-card"><div className="brand-mark"><span /><span /><span /></div><h1>3XUI Manager</h1><p className="auth-intro">Checking your session…</p></section></main>;
-  if (!sessionUser) return <AuthScreen onAuthenticated={onAuthenticated} initialError={authError} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} turnstileRequired={publicConfig?.registrationTurnstileEnabled ?? false} securityConfigLoaded={securityConfigLoaded} securityConfigError={securityConfigError} />;
+  const siteTitle = siteTitleOf(publicConfig);
+  useEffect(() => { document.title = siteTitle; }, [siteTitle]);
+  if (loading) return <main className={`auth-shell ${detectTheme()}`}><section className="auth-card"><img className="brand-icon" src="/favicon.svg" alt="" width={25} height={25} /><h1>{siteTitle}</h1><p className="auth-intro">Checking your session…</p></section></main>;
+  if (!sessionUser) return <AuthScreen siteTitle={siteTitle} onAuthenticated={onAuthenticated} initialError={authError} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} turnstileRequired={publicConfig?.registrationTurnstileEnabled ?? false} securityConfigLoaded={securityConfigLoaded} securityConfigError={securityConfigError} />;
   return <DashboardApp sessionUser={sessionUser} publicConfig={publicConfig} onSettingsSaved={refreshPublicConfig} onLogout={() => { void logout(); }} />;
 }
 
@@ -412,6 +418,7 @@ function rememberTheme(theme: Theme) {
 }
 
 function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: { sessionUser: AuthenticatedUser; publicConfig: PublicConfig | null; onSettingsSaved: () => Promise<void>; onLogout: () => void }) {
+  const siteTitle = siteTitleOf(publicConfig);
   const [locale, setLocale] = useState<Locale>(() => detectLocale());
   const [page, setPage] = useState<PageKey>("overview");
   const [admin, setAdmin] = useState(sessionUser.role === "admin");
@@ -872,8 +879,8 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
       {mobileOpen && <button className="mobile-scrim" aria-label={say(locale, "关闭导航", "Close navigation")} onClick={() => setMobileOpen(false)} />}
       <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "open" : ""} ${sidebarCollapsed ? "collapsed" : ""}`}>
         <div className="brand-row">
-          <div className="brand-mark"><span /><span /><span /></div>
-          <div className="brand-copy"><strong>3xui<span>.</span></strong><small>MANAGER</small></div>
+          <img className="brand-icon" src="/favicon.svg" alt="" width={29} height={29} />
+          <div className="brand-copy"><strong title={siteTitle}>{siteTitle}</strong></div>
           <button className="sidebar-collapse" type="button" aria-label={sidebarCollapsed ? (say(locale, "展开侧边栏", "Expand sidebar")) : (say(locale, "折叠侧边栏", "Collapse sidebar"))} aria-expanded={!sidebarCollapsed} aria-controls="app-sidebar" title={sidebarCollapsed ? (say(locale, "展开侧边栏", "Expand sidebar")) : (say(locale, "折叠侧边栏", "Collapse sidebar"))} onClick={toggleSidebar}><ChevronLeft size={15} /></button>
         </div>
         <button className="workspace-switch" type="button" title={sessionUser.email} onClick={() => { if (canAdmin) setAdmin(!admin); }}>
@@ -934,7 +941,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
           {page === "account" && <AccountPage t={t} locale={locale} user={sessionUser} overview={overview} rows={orderDisplayRows} onNavigate={setPage} />}
           {page === "checkin" && <CheckinPage t={t} locale={locale} attendance={overview?.attendance ?? null} available={Boolean(overview?.capabilities.trafficMetering)} securityConfigAvailable={publicConfig !== null} turnstileRequired={Boolean(publicConfig?.checkinTurnstileEnabled)} turnstileSiteKey={publicConfig?.turnstileSiteKey ?? null} busy={checkinBusy} onCheckin={(token) => { void submitCheckin(token); }} />}
           {page === "system" && <SystemPage t={t} locale={locale} onSaved={async () => { setRefreshToken((value) => value + 1); await onSettingsSaved(); }} theme={theme} accent={accent} onTheme={chooseTheme} onAccent={setAccent} onLocale={changeLocale} onAction={(label) => flash(label)} />}
-          <footer className="page-footer"><span>© {new Date().getFullYear()} 3XUI Manager</span><span><i /> {t("apiStatus")}</span></footer>
+          <footer className="page-footer"><span>© {new Date().getFullYear()} {siteTitle}</span><span><i /> {t("apiStatus")}</span></footer>
         </section>
       </main>
       {notice && <div className="toast"><span className="toast-check"><Check size={14} /></span>{notice}<button aria-label={say(locale, "关闭提示", "Dismiss")} onClick={() => setNotice("")}><X size={14} /></button></div>}
@@ -2041,6 +2048,7 @@ function settingsDraft(settings: Record<string, unknown>): Record<string, string
     referralValidityDays: number("referralValidityDays", 30),
     checkinMinRewardGb: String(Number(number("checkinMinTrafficBytes", reward)) / BYTES_PER_GB),
     checkinMaxRewardGb: String(Number(number("checkinMaxTrafficBytes", reward)) / BYTES_PER_GB),
+    siteTitle: typeof settings.siteTitle === "string" && settings.siteTitle.trim() ? settings.siteTitle : "3XUI Manager",
     ...Object.fromEntries(["publicAppUrl", "turnstileSiteKey", "resendFrom", "waffoMerchantId", "waffoPublicKey"].map((key) => [key, typeof settings[key] === "string" ? settings[key] : ""])),
     waffoEnvironment: settings.waffoEnvironment === "production" ? "production" : "sandbox",
     turnstileSecretKey: "", resendApiKey: "", waffoApiKey: "", waffoSigningKey: "",
@@ -2055,7 +2063,7 @@ function settingsDraft(settings: Record<string, unknown>): Record<string, string
 
 /** One-line description of each settings tab. */
 function settingsTabHint(tab: SettingsTabKey, locale: Locale): string {
-  if (tab === "platform") return say(locale, "注册、初始余额与时区。", "Registration, starting balance and time zone.");
+  if (tab === "platform") return say(locale, "网站标题、注册、初始余额与时区。", "Site title, registration, starting balance and time zone.");
   if (tab === "security") return say(locale, "人机验证与登录安全策略。", "Human verification and login security.");
   if (tab === "referrals") return say(locale, "邀请码与返利比例。", "Invite codes and referral commission.");
   if (tab === "attendance") return say(locale, "每日签到奖励的流量额度。", "Traffic granted by the daily check-in.");
@@ -2112,10 +2120,13 @@ function SystemPage({ t, locale, onSaved, theme, accent, onTheme, onAccent, onLo
       if (tab === "platform") {
         const balance = parseMoneyInput(String(draft.defaultBalance ?? ""), "USD");
         if (balance === null) throw new Error(say(locale, "初始余额格式不正确。", "The starting balance is not a valid amount."));
+        const siteTitle = String(draft.siteTitle ?? "").trim();
+        if (!siteTitle) throw new Error(say(locale, "请填写网站标题。", "Enter a site title."));
+        if (siteTitle.length > 60) throw new Error(say(locale, "网站标题最多 60 个字符。", "The site title can be at most 60 characters."));
         text("publicAppUrl");
         const timezone = String(draft.timezone ?? "").trim();
         if (!timezone) throw new Error(say(locale, "请填写时区名称。", "Enter a time zone name."));
-        Object.assign(payload, { registrationEnabled: isOn("registrationEnabled"), inviteRequired: isOn("inviteRequired"), emailVerificationRequired: isOn("emailVerificationRequired"), defaultBalanceMinor: balance, timezone });
+        Object.assign(payload, { siteTitle, registrationEnabled: isOn("registrationEnabled"), inviteRequired: isOn("inviteRequired"), emailVerificationRequired: isOn("emailVerificationRequired"), defaultBalanceMinor: balance, timezone });
       } else if (tab === "security") {
         text("turnstileSiteKey");
         secret("turnstileSecretKey");
@@ -2159,9 +2170,9 @@ function SystemPage({ t, locale, onSaved, theme, accent, onTheme, onAccent, onLo
   );
   const toggleRow = (key: string, title: string, hint: string) => row(key, title, hint,
     <button type="button" role="switch" aria-checked={isOn(key)} aria-label={title} className={`toggle ${isOn(key) ? "on" : "off"}`} disabled={!draft || saving} onClick={() => setValue(key, !isOn(key))}><i /></button>);
-  const inputRow = (key: string, title: string, hint: string, options: { type?: string; min?: number; max?: number; step?: string; suffix?: string } = {}) => row(key, title, hint,
+  const inputRow = (key: string, title: string, hint: string, options: { type?: string; min?: number; max?: number; step?: string; suffix?: string; maxLength?: number } = {}) => row(key, title, hint,
     <label className="settings-input">
-      <input type={options.type ?? "text"} inputMode={options.type === "number" ? "decimal" : undefined} value={String(draft?.[key] ?? "")} min={options.min} max={options.max} step={options.step} disabled={!draft || saving} aria-label={title} onChange={(event) => setValue(key, event.target.value)} />
+      <input type={options.type ?? "text"} inputMode={options.type === "number" ? "decimal" : undefined} value={String(draft?.[key] ?? "")} min={options.min} max={options.max} step={options.step} maxLength={options.maxLength} disabled={!draft || saving} aria-label={title} onChange={(event) => setValue(key, event.target.value)} />
       {options.suffix && <span>{options.suffix}</span>}
     </label>);
   const pemInput = (key: string, title: string, disabled = false) => <textarea className="settings-select" rows={4} style={{ width: "100%", maxWidth: "100%", resize: "vertical" }} aria-label={title} autoComplete="off" spellCheck={false} value={String(draft?.[key] ?? "")} disabled={!draft || saving || disabled} onChange={(event) => setValue(key, event.target.value)} />;
@@ -2180,6 +2191,7 @@ function SystemPage({ t, locale, onSaved, theme, accent, onTheme, onAccent, onLo
       {!draft && !error && <div className="auth-message" role="status">{say(locale, "正在加载设置…", "Loading settings…")}</div>}
       {error && <div className="auth-message error" role="alert">{error}</div>}
       {draft && tab === "platform" && <>
+        {inputRow("siteTitle", say(locale, "网站标题", "Site title"), say(locale, "显示在浏览器标签页、侧边栏与页脚，保存后立即生效。", "Shown in the browser tab, sidebar and footer; applies as soon as it is saved."), { maxLength: 60 })}
         {inputRow("publicAppUrl", say(locale, "站点公开地址", "Public site URL"), say(locale, "用于验证邮件、支付回调与跳转，例如 https://example.com。", "Used for verification emails, payment callbacks and redirects, e.g. https://example.com."), { type: "url" })}
         {row("storage", t("storageMode"), `${t("d1Mode")} · ${health?.capabilities?.trafficMetering ? t("active") : t("offline")}`, <span className={`status-chip ${health?.capabilities?.trafficMetering ? "" : "pending"}`}><i />{health?.capabilities?.trafficMetering ? t("active") : t("offline")}</span>)}
         {toggleRow("registrationEnabled", say(locale, "开放注册", "Open registration"), say(locale, "关闭后注册接口返回 403。", "When off, sign-up returns 403."))}

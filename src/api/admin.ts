@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { businessSettingKeys, prepareBusinessSettings, publicSettings, validateBusinessSetting } from "../services/settings";
 import type { Context } from "hono";
-import { FREE_PLAN_ID, defaultPlan, ensureDefaultPlan, readCheckinRewardRange, readSetting, servesPlan, writeSetting } from "../domain/defaults";
+import { FREE_PLAN_ID, MAX_SITE_TITLE_LENGTH, defaultPlan, ensureDefaultPlan, readCheckinRewardRange, readSetting, servesPlan, writeSetting } from "../domain/defaults";
 import { encryptSecret, hashPassword } from "../domain/security";
 import type { ApiEnv } from "./context";
 import { requireAdmin, validateSameOrigin } from "./context";
@@ -788,8 +788,9 @@ admin.get("/settings", requireAdmin, async (c) => {
 admin.put("/settings", requireAdmin, async (c) => {
   const body = await parseBody(c);
   if (!body) return c.json({ error: "Settings object is required." }, 400);
+  if (typeof body.siteTitle === "string") body.siteTitle = body.siteTitle.trim();
   const allowed = new Set([
-    ...businessSettingKeys,
+    ...businessSettingKeys, "siteTitle",
     "registrationEnabled", "emailVerificationRequired", "turnstileEnabled", "turnstileOnCheckin", "inviteRequired",
     "userInvitesEnabled", "userInviteLimit", "defaultBalanceMinor", "referralPercent", "referralValidityDays",
     "checkinTrafficBytes", "checkinMinTrafficBytes", "checkinMaxTrafficBytes", "deleteInactiveAfterDays", "deleteWithoutPlanAfterDays", "warnBeforeDeleteDays",
@@ -799,6 +800,9 @@ admin.put("/settings", requireAdmin, async (c) => {
     if (!allowed.has(key)) continue;
     const configError = validateBusinessSetting(key, value);
     if (configError) return c.json({ error: configError }, 422);
+    if (key === "siteTitle" && (typeof value !== "string" || !value || value.length > MAX_SITE_TITLE_LENGTH || /[\u0000-\u001f\u007f]/.test(value))) {
+      return c.json({ error: `siteTitle must be 1-${MAX_SITE_TITLE_LENGTH} printable characters.` }, 422);
+    }
     if (["registrationEnabled", "emailVerificationRequired", "turnstileEnabled", "turnstileOnCheckin", "inviteRequired", "userInvitesEnabled"].includes(key) && typeof value !== "boolean") return c.json({ error: `${key} must be boolean.` }, 422);
     if (key === "referralPercent" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100)) return c.json({ error: "Referral percent must be between 0 and 100." }, 422);
     if (key === "referralValidityDays" && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 3650)) return c.json({ error: "Referral validity must be between 0 and 3650 days." }, 422);

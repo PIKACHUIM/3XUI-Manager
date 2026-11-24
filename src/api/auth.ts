@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { RuntimeEnv } from "../env";
-import { ensureDefaults, FREE_PLAN_ID, readSetting } from "../domain/defaults";
+import { DEFAULT_SITE_TITLE, ensureDefaults, FREE_PLAN_ID, readSetting } from "../domain/defaults";
 import { hashPassword, randomToken, sha256, verifyPassword, verifySecret } from "../domain/security";
 import type { Invite, PasswordReset, Plan, Session, User } from "../domain/types";
 import type { ApiEnv } from "./context";
@@ -27,11 +27,13 @@ auth.use("*", csrf);
 
 auth.get("/config", async (c) => {
   const store = c.get("store");
-  const [registrationTurnstileEnabled, checkinTurnstileEnabled] = await Promise.all([
+  const [registrationTurnstileEnabled, checkinTurnstileEnabled, siteTitle] = await Promise.all([
     readSetting<boolean>(store, "turnstileEnabled", false),
     readSetting<boolean>(store, "turnstileOnCheckin", false),
+    readSetting<string>(store, "siteTitle", DEFAULT_SITE_TITLE),
   ]);
   return c.json({
+    siteTitle: typeof siteTitle === "string" && siteTitle.trim() ? siteTitle.trim() : DEFAULT_SITE_TITLE,
     turnstileSiteKey: (await readSetting<string>(store, "turnstileSiteKey", "")).trim() || null,
     registrationTurnstileEnabled,
     checkinTurnstileEnabled,

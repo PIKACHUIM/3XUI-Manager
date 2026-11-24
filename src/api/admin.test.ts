@@ -95,6 +95,13 @@ describe("admin API local D1 integration", () => {
     expect(await store.get("settings", "publicAppUrl")).toMatchObject({ value: "https://manager.example.test" });
     expect((await put({ publicAppUrl: "https://changed.example.test", referralPercent: 101 })).status).toBe(422);
     expect(await store.get("settings", "publicAppUrl")).toMatchObject({ value: "https://manager.example.test" });
+    expect((await put({ siteTitle: "  Pikachu 机场  " })).status).toBe(200);
+    expect(await store.get("settings", "siteTitle")).toMatchObject({ value: "Pikachu 机场" });
+    expect(await (await request("/api/auth/config")).json()).toMatchObject({ siteTitle: "Pikachu 机场" });
+    expect((await put({ siteTitle: "   " })).status).toBe(422);
+    expect((await put({ siteTitle: "x".repeat(61) })).status).toBe(422);
+    expect(await store.get("settings", "siteTitle")).toMatchObject({ value: "Pikachu 机场" });
+    expect((await put({ siteTitle: "3XUI Manager" })).status).toBe(200);
     expect((await put({ resendApiKey: null })).status).toBe(200);
     expect(await readBusinessConfig({ ...env, RESEND_API_KEY: "ignored-old-env" } as RuntimeEnv, ["RESEND_API_KEY"])).toEqual({});
     expect(await (await request("/api/admin/settings", { headers })).json()).toMatchObject({ secretConfigured: { resendApiKey: false } });
@@ -417,7 +424,7 @@ describe("admin API local D1 integration", () => {
       const config = await request("/api/auth/config");
       expect(config.status).toBe(200);
       const publicConfig = await config.json();
-      expect(publicConfig).toEqual({ turnstileSiteKey: "local-turnstile-site-key", registrationTurnstileEnabled: true, checkinTurnstileEnabled: true });
+      expect(publicConfig).toEqual({ siteTitle: "3XUI Manager", turnstileSiteKey: "local-turnstile-site-key", registrationTurnstileEnabled: true, checkinTurnstileEnabled: true });
       expect(JSON.stringify(publicConfig)).not.toContain("local-turnstile-secret");
 
       const registrationBody = { email, password: "local-turnstile-password-12", turnstileToken: "signup-token" };

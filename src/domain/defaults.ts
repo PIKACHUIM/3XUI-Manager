@@ -38,7 +38,12 @@ export const defaultPlan: Plan = {
   updatedAt: new Date(0).toISOString(),
 };
 
+/** The browser title and the sidebar brand text, overridable from system settings. */
+export const DEFAULT_SITE_TITLE = "3XUI Manager";
+export const MAX_SITE_TITLE_LENGTH = 60;
+
 export const defaultSettings: Record<string, unknown> = {
+  siteTitle: DEFAULT_SITE_TITLE,
   registrationEnabled: true,
   emailVerificationRequired: true,
   turnstileEnabled: false,
