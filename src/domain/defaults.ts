@@ -1,9 +1,45 @@
-import type { Inbound, Plan, User } from "./types";
+import type { Inbound, InboundNodeBinding, NodeRecord, Plan, User } from "./types";
 import type { DocumentStore } from "../storage/store";
 
 export const FREE_PLAN_ID = "plan-free";
 export const SESSION_COOKIE = "3xui_session";
 export const SESSION_DAYS = 7;
+
+export function validSortIndex(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 9999;
+}
+
+export function isMainlandNode(node: Pick<NodeRecord, "name" | "region">): boolean {
+  const label = `${node.region ?? ""} ${node.name}`;
+  if (/香港|澳门|澳門|台湾|臺灣|台灣|hong\s*kong|macau|macao|taiwan/i.test(label)) return false;
+  return /大陆|大陸|江苏|江蘇|镇江|鎮江|陕西|陝西|西安|北京|上海|天津|重庆|重慶|广东|廣東|广州|廣州|深圳|浙江|杭州|福建|福州|厦门|廈門|山东|山東|湖北|湖南|四川|成都|河南|河北|山西|安徽|江西|广西|廣西|海南|辽宁|遼寧|吉林|黑龙江|黑龍江|贵州|貴州|云南|雲南|甘肃|甘肅|青海|宁夏|寧夏|内蒙古|內蒙古|新疆|西藏|mainland|jiangsu|zhenjiang|xi.?an|shaanxi/i.test(label) || /^(cn|china|中国|中國)$/i.test(node.region?.trim() ?? "");
+}
+
+export function compareNodes(a: Pick<NodeRecord, "id" | "name" | "region" | "sortIndex">, b: Pick<NodeRecord, "id" | "name" | "region" | "sortIndex">): number {
+  return Number(isMainlandNode(b)) - Number(isMainlandNode(a))
+    || (a.sortIndex ?? 0) - (b.sortIndex ?? 0)
+    || a.name.localeCompare(b.name, "zh-CN", { numeric: true }) || a.id.localeCompare(b.id);
+}
+
+/** An inbound is mainland-only when all its known bound nodes are mainland nodes. */
+export function mainlandInboundIds(bindings: readonly InboundNodeBinding[], nodes: readonly NodeRecord[]): Set<string> {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const locations = new Map<string, boolean[]>();
+  for (const binding of bindings) {
+    const node = nodesById.get(binding.nodeId);
+    if (!node) continue;
+    const flags = locations.get(binding.inboundId) ?? [];
+    flags.push(isMainlandNode(node));
+    locations.set(binding.inboundId, flags);
+  }
+  return new Set([...locations].filter(([, flags]) => flags.every(Boolean)).map(([id]) => id));
+}
+
+export function compareInbounds(a: Inbound, b: Inbound, mainlandIds: ReadonlySet<string>): number {
+  return Number(mainlandIds.has(b.id)) - Number(mainlandIds.has(a.id))
+    || (a.subSortIndex ?? 1) - (b.subSortIndex ?? 1)
+    || a.name.localeCompare(b.name, "zh-CN", { numeric: true }) || a.id.localeCompare(b.id);
+}
 
 /**
  * An inbound serves a plan user when it is enabled, plan-enabled and either the user's current

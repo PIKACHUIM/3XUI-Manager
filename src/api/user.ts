@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { randomCheckinReward, readCheckinRewardRange, readSetting, servesPlan } from "../domain/defaults";
+import { compareNodes, randomCheckinReward, readCheckinRewardRange, readSetting, servesPlan } from "../domain/defaults";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, Order, Plan, User } from "../domain/types";
 import { verifyTurnstile } from "../services/turnstile";
 import { notificationRecordId, type UserNotification } from "../services/notifications";
@@ -142,7 +142,7 @@ userApi.get("/overview", async (c) => {
   const activeNodes = [...new Map(activeBindings.flatMap((binding) => {
     const node = nodeMap.get(binding.nodeId);
     return node?.enabled ? [[node.id, node] as const] : [];
-  })).values()];
+  })).values()].sort(compareNodes);
   const now = new Date();
   const timeZone = typeof configuredTimeZone === "string" && configuredTimeZone ? configuredTimeZone : "UTC";
   const today = dateInTimeZone(now, timeZone);
@@ -205,11 +205,12 @@ userApi.get("/nodes", async (c) => {
     if (!node?.enabled || !inbound) return [];
     const mapping = clientMap.get(inbound.id);
     return [{
-      node: { id: node.id, name: node.name, region: node.region, publicAddress: node.publicAddress, status: node.status },
+      node: { id: node.id, name: node.name, region: node.region, sortIndex: node.sortIndex ?? 0, publicAddress: node.publicAddress, status: node.status },
       inbound: { id: inbound.id, name: inbound.name, protocol: inbound.protocol, network: inbound.network, port: inbound.port, multiplier: inbound.multiplier },
       client: mapping ? { email: mapping.email, clientId: mapping.clientId, enabled: mapping.enable, syncStatus: mapping.syncStatus } : null,
     }];
   });
+  items.sort((a, b) => compareNodes(a.node, b.node));
   return c.json({ items });
 });
 

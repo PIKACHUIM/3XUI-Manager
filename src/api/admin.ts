@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { businessSettingKeys, prepareBusinessSettings, publicSettings, validateBusinessSetting } from "../services/settings";
 import type { Context } from "hono";
-import { FREE_PLAN_ID, MAX_SITE_TITLE_LENGTH, defaultPlan, ensureDefaultPlan, readCheckinRewardRange, readSetting, servesPlan, writeSetting } from "../domain/defaults";
+import { FREE_PLAN_ID, MAX_SITE_TITLE_LENGTH, compareInbounds, compareNodes, defaultPlan, ensureDefaultPlan, mainlandInboundIds, readCheckinRewardRange, readSetting, servesPlan, validSortIndex, writeSetting } from "../domain/defaults";
 import { encryptSecret, hashPassword } from "../domain/security";
 import type { ApiEnv } from "./context";
 import { requireAdmin, validateSameOrigin } from "./context";
@@ -66,6 +66,7 @@ function inboundMeta(body: Record<string, unknown>): Partial<Inbound> {
   if (typeof body.excludeFromSub === "boolean") meta.excludeFromSub = body.excludeFromSub;
   if (typeof body.disableFlow === "boolean") meta.disableFlow = body.disableFlow;
   if (typeof body.defaultFlow === "string" && body.defaultFlow.length <= 64) meta.defaultFlow = body.defaultFlow;
+  if (typeof body.exitLabel === "string") meta.exitLabel = body.exitLabel.trim().slice(0, 64);
   return meta;
 }
 
@@ -312,12 +313,13 @@ admin.delete("/plans/:id", requireAdmin, async (c) => {
 
 admin.get("/nodes", requireAdmin, async (c) => {
   const nodes = await listAll<NodeRecord>(c.get("store"), "nodes");
-  return c.json({ items: nodes.map(safeNode), count: nodes.length });
+  return c.json({ items: nodes.sort(compareNodes).map(safeNode), count: nodes.length });
 });
 
 admin.post("/nodes", requireAdmin, async (c) => {
   const body = await parseBody(c);
   if (!body || typeof body.name !== "string" || typeof body.panelUrl !== "string") return c.json({ error: "Node name and panel URL are required." }, 422);
+  if (Object.hasOwn(body, "sortIndex") && !validSortIndex(body.sortIndex)) return c.json({ error: "Sort order must be an integer between 0 and 9999." }, 422);
   if (!c.env.APP_ENCRYPTION_KEY) return c.json({ error: "Set APP_ENCRYPTION_KEY before registering nodes." }, 503);
   try { validatePanelUrl(body.panelUrl); } catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid panel URL." }, 422); }
   const password = typeof body.password === "string" ? body.password : "";
@@ -325,6 +327,7 @@ admin.post("/nodes", requireAdmin, async (c) => {
   if (!password && !token) return c.json({ error: "Provide a panel password or scoped API token." }, 422);
   const record: NodeRecord = {
     id: crypto.randomUUID(), name: body.name.trim().slice(0, 80), region: typeof body.region === "string" ? body.region.slice(0, 80) : "",
+    sortIndex: validSortIndex(body.sortIndex) ? body.sortIndex : 0,
     panelUrl: body.panelUrl, publicAddress: typeof body.publicAddress === "string" ? body.publicAddress : "",
     username: typeof body.username === "string" ? body.username : "", encryptedPassword: await encryptSecret(password, c.env.APP_ENCRYPTION_KEY),
     apiTokenEncrypted: token ? await encryptSecret(token, c.env.APP_ENCRYPTION_KEY) : null,
@@ -370,6 +373,15 @@ admin.patch("/nodes/:id", requireAdmin, async (c) => {
   if (!node) return c.json({ error: "Node not found." }, 404);
   const body = await parseBody(c);
   if (!body) return c.json({ error: "Invalid request body." }, 400);
+  if (Object.hasOwn(body, "sortIndex")) {
+    if (!validSortIndex(body.sortIndex)) return c.json({ error: "Sort order must be an integer between 0 and 9999." }, 422);
+    node.sortIndex = body.sortIndex;
+    if (Object.keys(body).length === 1) {
+      node.updatedAt = now();
+      await store.put("nodes", node.id, node);
+      return c.json({ node: safeNode(node), mappingsResynced: 0 });
+    }
+  }
   if (!c.env.APP_ENCRYPTION_KEY) return c.json({ error: "APP_ENCRYPTION_KEY is not configured." }, 503);
   if (typeof body.panelUrl === "string") {
     try { validatePanelUrl(body.panelUrl); } catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid panel URL." }, 422); }
@@ -425,11 +437,14 @@ admin.delete("/nodes/:id", requireAdmin, async (c) => {
 
 admin.get("/inbounds", requireAdmin, async (c) => {
   const store = c.get("store");
-  const [items, bindings, clients] = await Promise.all([
+  const [items, bindings, clients, nodes] = await Promise.all([
     listAll<Inbound>(store, "inbounds"),
     listAll<InboundNodeBinding>(store, "inbound-node-bindings"),
     listAll<ClientMapping>(store, "clients"),
+    listAll<NodeRecord>(store, "nodes"),
   ]);
+  const mainlandIds = mainlandInboundIds(bindings, nodes);
+  items.sort((a, b) => compareInbounds(a, b, mainlandIds));
   const sync = items.map((inbound) => ({ inboundId: inbound.id, nodes: bindings.filter((binding) => binding.inboundId === inbound.id).length, clients: clients.filter((client) => client.inboundId === inbound.id).length }));
   return c.json({ items, bindings, sync });
 });
@@ -437,6 +452,7 @@ admin.get("/inbounds", requireAdmin, async (c) => {
 admin.post("/inbounds", requireAdmin, async (c) => {
   const body = await parseBody(c);
   if (!body || typeof body.name !== "string" || typeof body.protocol !== "string" || typeof body.port !== "number" || !Array.isArray(body.nodeIds)) return c.json({ error: "Name, protocol, port, and selected nodes are required." }, 422);
+  if (Object.hasOwn(body, "subSortIndex") && !validSortIndex(body.subSortIndex)) return c.json({ error: "Sort order must be an integer between 0 and 9999." }, 422);
   const nodeIds = [...new Set(body.nodeIds.filter((id): id is string => typeof id === "string"))];
   const level = typeof body.minimumLevel === "number" ? body.minimumLevel : 0;
   const multiplier = typeof body.multiplier === "number" ? body.multiplier : 1;
@@ -619,6 +635,15 @@ admin.patch("/inbounds/:id", requireAdmin, async (c) => {
   const body = await parseBody(c);
   if (!body) return c.json({ error: "Invalid request body." }, 400);
   const next: Inbound = { ...inbound };
+  if (Object.hasOwn(body, "subSortIndex")) {
+    if (!validSortIndex(body.subSortIndex)) return c.json({ error: "Sort order must be an integer between 0 and 9999." }, 422);
+    next.subSortIndex = body.subSortIndex;
+    if (Object.keys(body).length === 1) {
+      next.updatedAt = now();
+      await store.put("inbounds", next.id, next);
+      return c.json({ inbound: next, failures: [] });
+    }
+  }
   if (typeof body.name === "string") next.name = body.name.trim().slice(0, 100);
   if (typeof body.protocol === "string") next.protocol = body.protocol.toLowerCase();
   if (typeof body.network === "string") next.network = body.network;
@@ -691,6 +716,7 @@ admin.post("/inbounds/:id/resync", requireAdmin, async (c) => {
         next.protocol = (remote.protocol ?? next.protocol).toLowerCase();
         next.network = typeof stream.network === "string" ? stream.network : next.network;
         Object.assign(next, panelMeta(remote));
+        if (inbound.subSortIndex !== undefined) next.subSortIndex = inbound.subSortIndex;
         next.config = { ...inbound.config, settings: panelObject(remote.settings), streamSettings: stream, sniffing: panelObject(remote.sniffing) };
         refreshed = true;
       }

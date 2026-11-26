@@ -80,6 +80,8 @@ export interface NodeRecord {
   id: string;
   name: string;
   region: string;
+  /** Display order within mainland/other nodes; lower numbers come first. */
+  sortIndex?: number;
   panelUrl: string;
   publicAddress: string;
   username: string;
@@ -131,6 +133,8 @@ export interface Inbound {
   disableFlow?: boolean;
   /** VLESS flow applied to clients provisioned for plan users. */
   defaultFlow?: string;
+  /** Optional exit-node label for subscription names, e.g. a relay inbound shows its landing node. */
+  exitLabel?: string;
   config: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

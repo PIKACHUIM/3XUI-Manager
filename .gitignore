@@ -155,3 +155,5 @@ vite.config.ts.timestamp-*
 
 # Editor settings
 .vscode/
+docs/3XUI-SSH节点连接信息.xlsx
+docs/运维手册.md

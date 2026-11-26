@@ -77,6 +77,59 @@ describe("admin API local D1 integration", () => {
     await platform?.dispose();
   });
 
+  it("persists node and inbound order without contacting panels, and lists mainland first", async () => {
+    const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
+    const store = new D1Store(platform.env.DB as unknown as Env["DB"]);
+    const suffix = crypto.randomUUID();
+    const nodes = [
+      { id: `order-jp-${suffix}`, name: "日本东京2", region: "东京", sortIndex: 0 },
+      { id: `order-xa-${suffix}`, name: "陕西西安1", region: "西安", sortIndex: 2 },
+      { id: `order-js-${suffix}`, name: "江苏镇江1", region: "江苏镇江", sortIndex: 1 },
+    ];
+    const inbounds = nodes.map((node, index) => ({
+      id: `order-in-${index}-${suffix}`, name: `排序入站${index}`, protocol: "vless", network: "tcp", port: 443,
+      enabled: true, minimumLevel: 0, multiplier: 1, subSortIndex: node.sortIndex, config: {}, createdAt: "", updatedAt: "",
+    }));
+    const connect = vi.spyOn(ThreeXuiClient, "connect").mockRejectedValue(new Error("Order must not contact panels"));
+    try {
+      for (const node of nodes) await store.put("nodes", node.id, { ...node, enabled: true, status: "online", encryptedPassword: "private", apiTokenEncrypted: null });
+      for (const [index, inbound] of inbounds.entries()) {
+        await store.put("inbounds", inbound.id, inbound);
+        await store.put("inbound-node-bindings", `${inbound.id}:${nodes[index]!.id}`, { id: `${inbound.id}:${nodes[index]!.id}`, inboundId: inbound.id, nodeId: nodes[index]!.id, panelInboundId: index + 1 });
+      }
+      const orderIds = async (path: string, ids: string[]) => {
+        const response = await request(path, { headers });
+        expect(response.status).toBe(200);
+        const body = await response.json() as { items: Array<{ id: string }> };
+        return body.items.filter((row) => ids.includes(row.id)).map((row) => row.id);
+      };
+      expect(await orderIds("/api/admin/nodes", nodes.map((node) => node.id))).toEqual([nodes[2]!.id, nodes[1]!.id, nodes[0]!.id]);
+      expect(await orderIds("/api/admin/inbounds", inbounds.map((inbound) => inbound.id))).toEqual([inbounds[2]!.id, inbounds[1]!.id, inbounds[0]!.id]);
+      const patch = (path: string, body: unknown) => request(path, { method: "PATCH", headers, body: JSON.stringify(body) });
+      expect((await patch(`/api/admin/nodes/${nodes[1]!.id}`, { sortIndex: 0 })).status).toBe(200);
+      expect((await store.get<{ sortIndex: number }>("nodes", nodes[1]!.id))?.sortIndex).toBe(0);
+      expect((await patch(`/api/admin/inbounds/${inbounds[1]!.id}`, { subSortIndex: 0 })).status).toBe(200);
+      expect((await store.get<Inbound>("inbounds", inbounds[1]!.id))?.subSortIndex).toBe(0);
+      expect(await orderIds("/api/admin/nodes", nodes.map((node) => node.id))).toEqual([nodes[1]!.id, nodes[2]!.id, nodes[0]!.id]);
+      expect(await orderIds("/api/admin/inbounds", inbounds.map((inbound) => inbound.id))).toEqual([inbounds[1]!.id, inbounds[2]!.id, inbounds[0]!.id]);
+      for (const value of [-1, 1.5, 10000, "1", null]) {
+        expect((await patch(`/api/admin/nodes/${nodes[1]!.id}`, { sortIndex: value })).status).toBe(422);
+        expect((await patch(`/api/admin/inbounds/${inbounds[1]!.id}`, { subSortIndex: value })).status).toBe(422);
+        expect((await request("/api/admin/inbounds", { method: "POST", headers, body: JSON.stringify({ name: "Invalid order", protocol: "vless", port: 443, nodeIds: [nodes[0]!.id], subSortIndex: value }) })).status).toBe(422);
+      }
+      expect((await patch(`/api/admin/nodes/${nodes[1]!.id}`, { sortIndex: 9999 })).status).toBe(200);
+      expect((await patch(`/api/admin/inbounds/${inbounds[1]!.id}`, { subSortIndex: 9999 })).status).toBe(200);
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      for (const node of nodes) await store.delete("nodes", node.id);
+      for (const [index, inbound] of inbounds.entries()) {
+        await store.delete("inbounds", inbound.id);
+        await store.delete("inbound-node-bindings", `${inbound.id}:${nodes[index]!.id}`);
+      }
+    }
+  });
+
   it("encrypts settings, redacts secrets, preserves blank values and validates before writing", async () => {
     const headers = { Cookie: cookie, Origin: "https://manager.test", "Content-Type": "application/json" };
     const put = (body: unknown) => request("/api/admin/settings", { method: "PUT", headers, body: JSON.stringify(body) });
@@ -865,6 +918,7 @@ describe("admin API local D1 integration", () => {
       });
       expect(created.status).toBe(201);
       const inboundId = ((await created.json()) as { inbound: { id: string } }).inbound.id;
+      expect((await request(`/api/admin/inbounds/${inboundId}`, { method: "PATCH", headers, body: JSON.stringify({ subSortIndex: 42 }) })).status).toBe(200);
 
       // The panel now serves a different port and transport than the local copy.
       const resync = await request(`/api/admin/inbounds/${inboundId}/resync`, { method: "POST", headers });
@@ -872,7 +926,7 @@ describe("admin API local D1 integration", () => {
       const resynced = await resync.json() as { inbound: Inbound; refreshed: boolean; recreated: string[]; failures: unknown[] };
       expect(resynced.refreshed).toBe(true);
       expect(resynced.recreated).toEqual([]);
-      expect(resynced.inbound).toMatchObject({ name: inboundName, port: 2053, network: "ws", planIds: [planId] });
+      expect(resynced.inbound).toMatchObject({ name: inboundName, port: 2053, network: "ws", planIds: [planId], subSortIndex: 42 });
       expect(resynced.inbound.config).toMatchObject({ streamSettings: { network: "ws", wsSettings: { path: "/resync" } } });
 
       // A node that lost the inbound gets it pushed back under a new panel id.

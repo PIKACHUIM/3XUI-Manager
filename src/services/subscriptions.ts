@@ -1,4 +1,4 @@
-import { servesPlan } from "../domain/defaults";
+import { compareInbounds, compareNodes, isMainlandNode, mainlandInboundIds, servesPlan } from "../domain/defaults";
 import { decryptSecret, encryptSecret, randomToken, sha256 } from "../domain/security";
 import { wireGuardPublicKey } from "../domain/wireguard";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, Plan, User } from "../domain/types";
@@ -204,7 +204,7 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
     const shortId = strings(reality.shortIds)[0] ?? text(client.shortId);
     if (!publicKey || !sni || !/^[a-f0-9]{0,16}$/i.test(shortId) || shortId.length % 2) return null;
     const fingerprint = text(client.fingerprint) || "chrome";
-    Object.assign(clash, { tls: true, servername: sni, "client-fingerprint": fingerprint, "reality-opts": { "public-key": publicKey, "short-id": shortId } });
+    Object.assign(clash, { tls: true, servername: sni, "client-fingerprint": fingerprint, "reality-opts": { "public-key": publicKey, "short-id": shortId, "support-x25519mlkem768": true } });
     params.set("sni", sni); params.set("pbk", publicKey); params.set("sid", shortId); params.set("fp", fingerprint);
   }
   let path = "", host = "";
@@ -272,8 +272,7 @@ function yamlLines(value: unknown, indent: number): string[] {
   return [`${pad}${yamlScalar(value)}`];
 }
 
-const CLASH_AUTO = "♻️ 自动选择";
-const CLASH_HEALTH_URL = "http://cp.cloudflare.com/generate_204";
+const CLASH_SELECT = "选择节点";
 type ClashCategoryTarget = "proxy" | "direct" | "reject";
 /** Rule categories; every group lists the nodes itself so the node choice stays manual. */
 const clashCategories: Array<[string, ClashCategoryTarget]> = [
@@ -331,20 +330,19 @@ const clashDns = {
 };
 /** Category options start from the default target, then every node, so the user can switch by hand. */
 function categoryProxies(target: ClashCategoryTarget, names: readonly string[]): string[] {
-  const nodes = [...names, ...(names.length ? [CLASH_AUTO] : [])];
+  const nodes = [...names, ...(names.length ? [CLASH_SELECT] : [])];
   if (target === "reject") return ["REJECT", "DIRECT", ...nodes];
   if (target === "direct") return ["DIRECT", ...nodes];
-  return [...(names.length ? [CLASH_AUTO] : []), ...names, "DIRECT"];
+  return [...(names.length ? [CLASH_SELECT] : []), ...names, "DIRECT"];
 }
 /**
  * A full Clash / Mihomo profile: general options, fake-ip DNS, the proxies and the rule categories.
- * Only the url-test group is generated besides the categories; node choice inside each category is
- * manual, so no selector, fallback or region group is created.
+ * The shared node selector and every category are manual select groups; no automatic switching.
  */
 function renderClashConfig(proxies: Array<Record<string, unknown>>): string {
   const names = proxies.map((proxy) => String(proxy.name));
   const groups: Array<Record<string, unknown>> = [];
-  if (names.length) groups.push({ name: CLASH_AUTO, type: "url-test", url: CLASH_HEALTH_URL, interval: 300, tolerance: 50, proxies: [...names] });
+  if (names.length) groups.push({ name: CLASH_SELECT, type: "select", proxies: [...names] });
   for (const [name, target] of clashCategories) groups.push({ name, type: "select", proxies: categoryProxies(target, names) });
   const config = {
     "mixed-port": 7890,
@@ -366,9 +364,10 @@ export async function renderSubscription(store: DocumentStore, user: User, key: 
 /** Renders a feed from already loaded rows, so a request never waits on more than one D1 round trip. */
 export async function renderSubscriptionFeed(user: User, sources: SubscriptionSources, key: string, format: SubscriptionFormat): Promise<{ body: string; contentType: string; count: number; skipped: number }> {
   const { inbounds, nodes, bindings, mappings } = sources;
-  const entries: ProxyEntry[] = []; let skipped = 0;
-  const usedNames = new Set<string>(clashCategories.map(([name]) => name));
-  for (const inbound of inbounds.sort((a, b) => (a.subSortIndex ?? 0) - (b.subSortIndex ?? 0))) {
+  const entries: Array<{ entry: ProxyEntry; inbound: Inbound; node: NodeRecord }> = []; let skipped = 0;
+  const usedNames = new Set<string>([CLASH_SELECT, "DIRECT", "REJECT", ...clashCategories.map(([name]) => name)]);
+  const mainlandIds = mainlandInboundIds(bindings, nodes);
+  for (const inbound of [...inbounds].sort((a, b) => compareInbounds(a, b, mainlandIds))) {
     if (!servesPlan(inbound, user) || inbound.excludeFromSub || (inbound.expiryTime && inbound.expiryTime <= Date.now())) continue;
     const mapping = mappings.find(m => m.inboundId === inbound.id && m.userId === user.id);
     // A partially synced inbound still serves the nodes that did accept the client; only a mapping
@@ -377,17 +376,21 @@ export async function renderSubscriptionFeed(user: User, sources: SubscriptionSo
     for (const binding of bindings.filter(b => b.inboundId === inbound.id && b.panelInboundId > 0)) {
       const node = nodes.find(n => n.id === binding.nodeId);
       if (!node?.enabled || !mapping.syncedNodes.includes(node.id)) continue;
-      const base = `${inbound.name} · ${node.name}`;
+      const nodeLabel = inbound.exitLabel?.trim() || node.name;
+      const base = `${inbound.name} · ${nodeLabel}`;
       let name = base;
       for (let suffix = 2; usedNames.has(name); suffix += 1) name = `${base} #${suffix}`;
       usedNames.add(name);
       const entry = await convertSubscriptionEntry(inbound, node, mapping, key, name);
-      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push(entry); else skipped++;
+      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push({ entry, inbound, node }); else skipped++;
     }
   }
+  entries.sort((a, b) => Number(isMainlandNode(b.node)) - Number(isMainlandNode(a.node))
+    || (a.inbound.subSortIndex ?? 1) - (b.inbound.subSortIndex ?? 1)
+    || compareNodes(a.node, b.node) || compareInbounds(a.inbound, b.inbound, mainlandIds));
   let body: string;
-  if (format === "clash") body = renderClashConfig(entries.map((entry) => entry.clash));
-  else if (format === "v2ray") body = base64(entries.map((entry) => entry.uri).join("\n"));
-  else body = JSON.stringify({ version: 1, servers: entries.map((entry) => entry.ss) }, null, 2);
+  if (format === "clash") body = renderClashConfig(entries.map(({ entry }) => entry.clash));
+  else if (format === "v2ray") body = base64(entries.map(({ entry }) => entry.uri).join("\n"));
+  else body = JSON.stringify({ version: 1, servers: entries.map(({ entry }) => entry.ss) }, null, 2);
   return { body, contentType: format === "clash" ? "application/yaml; charset=utf-8" : format === "v2ray" ? "text/plain; charset=utf-8" : "application/json; charset=utf-8", count: entries.length, skipped };
 }

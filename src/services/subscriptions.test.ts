@@ -48,6 +48,11 @@ describe("subscription formats", () => {
     expect(trojan?.clash).toMatchObject({ password: "real-password", "grpc-opts": { "grpc-service-name": "rpc" } });
     const reality = await convertSubscriptionEntry({ ...inbound, config: { streamSettings: { security: "reality", realitySettings: { privateKey: "NEVER-EXPORT", serverNames: ["tls.example.com"], shortIds: ["aabb"], settings: { publicKey: "public-key" } } } } }, node, { ...mapping, flow: "xtls-rprx-vision" }, key);
     expect(reality?.uri).toContain("pbk=public-key");
+    expect(reality?.clash).toMatchObject({
+      tls: true, servername: "tls.example.com", "client-fingerprint": "chrome", flow: "xtls-rprx-vision",
+      "reality-opts": { "public-key": "public-key", "short-id": "aabb", "support-x25519mlkem768": true },
+    });
+    expect(vless?.clash["reality-opts"]).toBeUndefined();
     expect(JSON.stringify([vless, vmess, trojan, reality])).not.toMatch(/NEVER-EXPORT|private-panel|admin-secret|admin-password/);
   });
   it("exports Hysteria2 with the per-client auth token and its Salamander obfs password", async () => {
@@ -149,19 +154,54 @@ describe("subscription formats", () => {
     expect(body.startsWith("# 3XUI Manager")).toBe(true);
     for (const line of [
       "mixed-port: 7890", 'mode: "rule"', "external-controller:", "dns:", 'enhanced-mode: "fake-ip"',
-      "proxies:", "proxy-groups:", "rules:", '"♻️ 自动选择"',
+      "proxies:", "proxy-groups:", "rules:", '"选择节点"',
       '"🎬 爱奇艺&哔哩哔哩"', '"🛑 拦截广告"', "MATCH,🐟 漏网之鱼", "GEOIP,CN,🇨🇳 国内网站",
     ]) expect(body).toContain(line);
     expect(body).toContain('"日本 · Tokyo"');
     expect(body).toContain('"日本 · Osaka"');
     expect(body).not.toContain("Subscription");
-    // No selector, fallback or region group is generated; nodes are picked inside each category.
-    for (const gone of ["🚀 节点选择", "🚑 故障转移", "📍 日本", 'type: "fallback"']) expect(body).not.toContain(gone);
-    expect(body).toContain('type: "url-test"');
-    // A proxy category defaults to 自动选择 and lists every node for a manual switch.
-    expect(body).toContain('proxies: ["♻️ 自动选择", "日本 · Tokyo", "日本 · Osaka", "DIRECT"]');
-    expect(body).toContain('proxies: ["DIRECT", "日本 · Tokyo", "日本 · Osaka", "♻️ 自动选择"]');
-    expect(body).toContain('proxies: ["REJECT", "DIRECT", "日本 · Tokyo", "日本 · Osaka", "♻️ 自动选择"]');
+    for (const gone of ["♻️ 自动选择", "🚑 故障转移", "📍 日本", 'type: "fallback"', 'type: "url-test"']) expect(body).not.toContain(gone);
+    expect(body).toContain('name: "选择节点"\n    type: "select"');
+    expect(body).toContain('proxies: ["选择节点", "日本 · Osaka", "日本 · Tokyo", "DIRECT"]');
+    expect(body).toContain('proxies: ["DIRECT", "日本 · Osaka", "日本 · Tokyo", "选择节点"]');
+    expect(body).toContain('proxies: ["REJECT", "DIRECT", "日本 · Osaka", "日本 · Tokyo", "选择节点"]');
+  });
+  it("sorts mainland entries first, then inbound and node order in every format", async () => {
+    const { store } = await setup();
+    const rows = [
+      { id: "jp", name: "日本东京2", region: "东京", sortIndex: 0 },
+      { id: "xa", name: "陕西西安1", region: "西安", sortIndex: 2 },
+      { id: "js", name: "江苏镇江1", region: "江苏镇江", sortIndex: 1 },
+    ];
+    for (const row of rows) {
+      await store.put("nodes", row.id, { ...node, ...row });
+      await store.put("inbound-node-bindings", `i:${row.id}`, { inboundId: "i", nodeId: row.id, panelInboundId: 2 });
+    }
+    await store.put("clients", "u:i", { ...mapping, syncedNodes: rows.map((row) => row.id) });
+    await store.put("inbounds", "i2", { ...inbound, id: "i2", name: "直连联通云盘1", subSortIndex: 2 });
+    await store.put("inbound-node-bindings", "i2:js", { inboundId: "i2", nodeId: "js", panelInboundId: 3 });
+    await store.put("clients", "u:i2", { ...mapping, id: "u:i2", inboundId: "i2", syncedNodes: ["js"] });
+    const clash = (await renderSubscription(store, user, key, "clash")).body;
+    const names = ["日本 · 江苏镇江1", "日本 · 陕西西安1", "直连联通云盘1 · 江苏镇江1", "日本 · 日本东京2"];
+    const positions = names.map((name) => clash.indexOf(`name: "${name}"`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    const uris = Buffer.from((await renderSubscription(store, user, key, "v2ray")).body, "base64").toString("utf8").split("\n");
+    expect(uris.map((uri) => decodeURIComponent(uri.split("#")[1]!))).toEqual(names);
+    await store.put("nodes", "xa", { ...node, ...rows[1], sortIndex: 0 });
+    const reordered = (await renderSubscription(store, user, key, "clash")).body;
+    expect(reordered.indexOf('name: "日本 · 陕西西安1"')).toBeLessThan(reordered.indexOf('name: "日本 · 江苏镇江1"'));
+  });
+  it("keeps a shared direct inbound distinct from a relay with an exit label", async () => {
+    const { store } = await setup();
+    await store.put("inbounds", "i", { ...inbound, name: "直连日本东京1" });
+    await store.put("nodes", "n", { ...node, name: "日本东京2" });
+    await store.put("inbounds", "relay", { ...inbound, id: "relay", name: "中转日本东京2", exitLabel: "日本东京1" });
+    await store.put("inbound-node-bindings", "relay:n", { inboundId: "relay", nodeId: "n", panelInboundId: 2 });
+    await store.put("clients", "u:relay", { ...mapping, id: "u:relay", inboundId: "relay" });
+    const body = (await renderSubscription(store, user, key, "clash")).body;
+    expect(body).toContain('name: "直连日本东京1 · 日本东京2"');
+    expect(body).toContain('name: "中转日本东京2 · 日本东京1"');
   });
   it("exports WireGuard peers with the server key derived from the panel secret", async () => {
     const wgInbound = {
