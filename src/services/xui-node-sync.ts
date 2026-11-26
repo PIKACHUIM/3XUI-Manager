@@ -29,6 +29,19 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : "3X-UI synchronization failed.";
 }
 
+/** The client-side VLESS encryption of one panel inbound; empty when the panel does not expose it. */
+function panelEncryption(inbounds: readonly XuiInbound[], panelInboundId: number): string | null {
+  const inbound = inbounds.find((item) => item.id === panelInboundId);
+  if (!inbound) return null;
+  let settings = inbound.settings;
+  if (typeof settings === "string") {
+    try { settings = JSON.parse(settings); } catch { return null; }
+  }
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
+  const encryption = (settings as { encryption?: unknown }).encryption;
+  return typeof encryption === "string" && encryption.trim() ? encryption.trim() : null;
+}
+
 /**
  * Whether the account should hold an enabled client on this inbound right now. Mirrors
  * `syncUserEntitlements` so both paths agree on who is served.
@@ -92,6 +105,15 @@ export async function syncNode(store: DocumentStore, env: RuntimeEnv, node: Node
   node.status = "online";
   node.lastCheckedAt = now;
   node.inboundCount = panelInbounds.length;
+  // A shared inbound can be created separately on each node, so its ML-KEM client encryption is
+  // node-local. Keep the panel value on the binding so the subscription sends the matching one.
+  for (const binding of nodeBindings) {
+    const encryption = panelEncryption(panelInbounds, binding.panelInboundId);
+    if (encryption && encryption !== binding.encryption) {
+      binding.encryption = encryption;
+      await store.put("inbound-node-bindings", binding.id, binding);
+    }
+  }
 
   let clients = 0;
   let written = 0;

@@ -381,8 +381,12 @@ export async function renderSubscriptionFeed(user: User, sources: SubscriptionSo
       let name = base;
       for (let suffix = 2; usedNames.has(name); suffix += 1) name = `${base} #${suffix}`;
       usedNames.add(name);
-      const entry = await convertSubscriptionEntry(inbound, node, mapping, key, name);
-      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push({ entry, inbound, node }); else skipped++;
+      const nodeEncryption = binding.encryption?.trim();
+      const entryInbound: Inbound = nodeEncryption
+        ? { ...inbound, config: { ...inbound.config, settings: { ...object(inbound.config.settings), encryption: nodeEncryption } } }
+        : inbound;
+      const entry = await convertSubscriptionEntry(entryInbound, node, mapping, key, name);
+      if (entry && (format !== "shadowsocks" || entry.ss)) entries.push({ entry, inbound: entryInbound, node }); else skipped++;
     }
   }
   entries.sort((a, b) => Number(isMainlandNode(b.node)) - Number(isMainlandNode(a.node))

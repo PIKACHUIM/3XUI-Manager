@@ -145,6 +145,8 @@ export interface InboundNodeBinding {
   inboundId: string;
   nodeId: string;
   panelInboundId: number;
+  /** Client-side VLESS encryption reported by this node; ML-KEM keys can differ per node. */
+  encryption?: string;
   createdAt: string;
 }
 
