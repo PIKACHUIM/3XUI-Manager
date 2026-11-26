@@ -145,8 +145,6 @@ export interface InboundNodeBinding {
   inboundId: string;
   nodeId: string;
   panelInboundId: number;
-  /** Client-side VLESS encryption reported by this node; ML-KEM keys can differ per node. */
-  encryption?: string;
   createdAt: string;
 }
 
@@ -162,6 +160,8 @@ export interface ClientMapping {
   syncStatus: SyncStatus;
   syncError: string | null;
   syncedNodes: string[];
+  /** Per-node VLESS client encryption reported by the panel; ML-KEM pairs are node-local. */
+  nodeEncryption?: Record<string, string>;
   /** WireGuard peer credentials minted on first sync; unused by the other protocols. */
   wgPrivateKey?: string;
   wgPublicKey?: string;

@@ -286,9 +286,11 @@ describe("subscription formats", () => {
         streamSettings: { network: "tcp", security: "none" },
       },
     });
-    await store.put("clients", "u:i", { ...mapping, syncedNodes: ["n", "n2"] });
-    await store.put("inbound-node-bindings", "i:n", { id: "i:n", inboundId: "i", nodeId: "n", panelInboundId: 1, encryption: "mlkem-node-1" });
-    await store.put("inbound-node-bindings", "i:n2", { id: "i:n2", inboundId: "i", nodeId: "n2", panelInboundId: 2, encryption: "mlkem-node-2" });
+    await store.put("clients", "u:i", {
+      ...mapping, syncedNodes: ["n", "n2"], nodeEncryption: { n: "mlkem-node-1", n2: "mlkem-node-2" },
+    });
+    await store.put("inbound-node-bindings", "i:n", { id: "i:n", inboundId: "i", nodeId: "n", panelInboundId: 1 });
+    await store.put("inbound-node-bindings", "i:n2", { id: "i:n2", inboundId: "i", nodeId: "n2", panelInboundId: 2 });
 
     const rendered = await renderSubscription(store, user, key, "clash");
     expect(rendered.count).toBe(2);

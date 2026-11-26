@@ -100,8 +100,7 @@ function fakePanel(panelId: string) {
   const fake = {
     listInbounds: vi.fn(async () => [{
       id: 1, protocol: "vless", settings: JSON.stringify({
-        encryption: "panel-key",
-        clients: [{ email: mapping.email, id: panelId, totalGB: 1000, expiryTime: 0, enable: true, limitIp: 0, flow: "" }],
+        clients: [{ email: mapping.email, id: panelId, encryption: "client-key-1", totalGB: 1000, expiryTime: 0, enable: true, limitIp: 0, flow: "" }],
       }), streamSettings: "{}", sniffing: "{}",
       clientStats: [{ email: mapping.email, up: 0, down: 0 }],
     }]),
@@ -121,10 +120,7 @@ describe("syncNode client identity", () => {
     expect(result.unchanged).toBe(0);
     expect(upsertClient).toHaveBeenCalledTimes(1);
     expect(await store.get<ClientMapping>("clients", mapping.id)).toMatchObject({
-      syncedNodes: ["node-1"], syncStatus: "synced",
-    });
-    expect(await store.get<InboundNodeBinding>("inbound-node-bindings", binding.id)).toMatchObject({
-      encryption: "panel-key",
+      syncedNodes: ["node-1"], syncStatus: "synced", nodeEncryption: { "node-1": "client-key-1" },
     });
   });
 

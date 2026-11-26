@@ -381,7 +381,7 @@ export async function renderSubscriptionFeed(user: User, sources: SubscriptionSo
       let name = base;
       for (let suffix = 2; usedNames.has(name); suffix += 1) name = `${base} #${suffix}`;
       usedNames.add(name);
-      const nodeEncryption = binding.encryption?.trim();
+      const nodeEncryption = mapping.nodeEncryption?.[node.id]?.trim();
       const entryInbound: Inbound = nodeEncryption
         ? { ...inbound, config: { ...inbound.config, settings: { ...object(inbound.config.settings), encryption: nodeEncryption } } }
         : inbound;
