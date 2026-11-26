@@ -175,6 +175,8 @@ export interface ClientQuota {
   limitIp: number;
   reset: number;
   flow: string;
+  /** VLESS/VMess client UUID; a drifted panel row must be rewritten with the account value. */
+  id?: string;
   auth?: string;
 }
 
@@ -199,7 +201,9 @@ export function clientQuota(mapping: ClientMapping, inbound: Inbound, user: User
   };
   // Hysteria has no UUID: the panel authenticates the client with this token, and the subscription
   // hands the same token to the client as the proxy password.
-  if (usesAuth(inbound.protocol.toLowerCase())) quota.auth = mapping.clientId;
+  const protocol = inbound.protocol.toLowerCase();
+  if (usesAuth(protocol)) quota.auth = mapping.clientId;
+  else if (protocol === "vless" || protocol === "vmess") quota.id = mapping.clientId;
   return quota;
 }
 
@@ -209,6 +213,9 @@ export function quotaMatches(panelClient: Record<string, unknown>, quota: Client
   const expiryTime = Number(panelClient.expiryTime ?? 0);
   if (!Number.isFinite(totalGB) || totalGB !== quota.totalGB || expiryTime !== quota.expiryTime) return false;
   if ((panelClient.enable !== false) !== quota.enable) return false;
+  // A row can keep a stale UUID while its quota already matches, which used to look "in sync" and
+  // left the subscription credential rejected by the panel. Compare the identifier as well.
+  if (quota.id !== undefined && panelClient.id !== quota.id) return false;
   if (quota.auth === undefined) return true;
   return typeof panelClient.auth === "string" && panelClient.auth === quota.auth;
 }

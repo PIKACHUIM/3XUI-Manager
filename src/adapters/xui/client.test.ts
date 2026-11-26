@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptSecret } from "../../domain/security";
 import type { NodeRecord } from "../../domain/types";
-import { probeNode, ThreeXuiClient } from "./client";
+import { clientQuota, probeNode, quotaMatches, ThreeXuiClient } from "./client";
 
 const ENCRYPTION_KEY = "unit-test-encryption-key-0123456789";
 const env = { APP_ENCRYPTION_KEY: ENCRYPTION_KEY } as never;
@@ -301,8 +301,21 @@ describe("upsertClient", () => {
 
     const update = calls.find((call) => call.url.includes("/panel/api/clients/update/"))!;
     expect(update.url).toBe("https://panel.example.test:2053/panel/api/clients/update/u_user-1_in-1");
-    expect(JSON.parse(update.body!)).toMatchObject({ email: "u_user-1_in-1", totalGB: 102_400_000_000_000, enable: true, flow: "" });
+    expect(JSON.parse(update.body!)).toMatchObject({ email: "u_user-1_in-1", totalGB: 102_400_000_000_000, enable: true, flow: "", id: mappingFixture.clientId });
     expect(calls.some((call) => call.url.endsWith("/panel/api/clients/add"))).toBe(false);
+  });
+
+  it("treats a stale panel UUID as out of sync and rewrites it in the update", async () => {
+    const calls = stubPanel(() => null);
+    const client = await ThreeXuiClient.connect(env, await makeNode());
+    const quota = clientQuota(mappingFixture as never, inboundFixture as never, userFixture as never);
+    expect(quota.id).toBe(mappingFixture.clientId);
+    expect(quotaMatches({ email: mappingFixture.email, totalGB: quota.totalGB, expiryTime: 0, enable: true, id: "stale-uuid" }, quota)).toBe(false);
+    expect(quotaMatches({ email: mappingFixture.email, totalGB: quota.totalGB, expiryTime: 0, enable: true, id: mappingFixture.clientId }, quota)).toBe(true);
+
+    await client.upsertClient(mappingFixture, inboundFixture, bindingFixture, userFixture);
+    const update = calls.find((call) => call.url.includes("/panel/api/clients/update/"))!;
+    expect(JSON.parse(update.body!)).toMatchObject({ id: mappingFixture.clientId });
   });
 
   it("offsets the quota by the panel counter so the remaining traffic matches the account", async () => {
