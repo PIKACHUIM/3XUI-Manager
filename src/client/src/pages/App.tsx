@@ -43,6 +43,29 @@ function useText(locale: Locale) {
   return (key: MessageKey) => messages[locale][key] ?? EN_MESSAGES[key];
 }
 
+const NAV_SHORT: Record<PageKey, { zh: string; zhTW: string; en: string }> = {
+  overview: { zh: "概览", zhTW: "概覽", en: "Home" },
+  subscription: { zh: "订阅", zhTW: "訂閱", en: "Subs" },
+  nodes: { zh: "节点", zhTW: "節點", en: "Nodes" },
+  plans: { zh: "套餐", zhTW: "套餐", en: "Plans" },
+  account: { zh: "账户", zhTW: "帳戶", en: "Acct" },
+  checkin: { zh: "签到", zhTW: "簽到", en: "Daily" },
+  users: { zh: "用户", zhTW: "用戶", en: "Users" },
+  inbounds: { zh: "入站", zhTW: "入站", en: "Inb" },
+  orders: { zh: "订单", zhTW: "訂單", en: "Orders" },
+  system: { zh: "系统", zhTW: "系統", en: "Sys" },
+  help: { zh: "帮助", zhTW: "幫助", en: "Help" },
+};
+const CJK_LABEL = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+
+/** Two-character label shown under the icon when the sidebar is collapsed. */
+function navShort(locale: Locale, key: PageKey, label: string): string {
+  if (locale === "zh") return NAV_SHORT[key].zh;
+  if (locale === "zh-TW") return NAV_SHORT[key].zhTW;
+  if (CJK_LABEL.test(label)) return Array.from(label).slice(0, 2).join("");
+  return NAV_SHORT[key].en;
+}
+
 function HeaderIcon({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string; onClick?: () => void }) {
   return <button className="icon-button" type="button" aria-label={label} title={label} onClick={onClick}><Icon size={18} strokeWidth={1.8} /></button>;
 }
@@ -871,7 +894,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
         </button>
         <div className="nav-section-label">{admin ? t("management") : t("workspace")}</div>
         <nav className="side-nav" aria-label={admin ? t("management") : t("workspace")}>
-          {menu.map(({ key, icon: Icon, label }) => <button key={key} className={`nav-item ${page === key ? "selected" : ""}`} title={t(label)} aria-current={page === key ? "page" : undefined} onClick={() => { setPage(key); setSearch(""); setEditor(null); setMobileOpen(false); }}><Icon size={18} strokeWidth={1.8} /><span>{t(label)}</span>{key === "orders" && (admin ? adminOrders.length : userOrders.length) > 0 && <span className="nav-pill">{admin ? adminOrders.length : userOrders.length}</span>}</button>)}
+          {menu.map(({ key, icon: Icon, label }) => <button key={key} className={`nav-item ${page === key ? "selected" : ""}`} data-short={navShort(locale, key, t(label))} title={t(label)} aria-current={page === key ? "page" : undefined} onClick={() => { setPage(key); setSearch(""); setEditor(null); setMobileOpen(false); }}><Icon size={18} strokeWidth={1.8} /><span>{t(label)}</span>{key === "orders" && (admin ? adminOrders.length : userOrders.length) > 0 && <span className="nav-pill">{admin ? adminOrders.length : userOrders.length}</span>}</button>)}
         </nav>
         <div className="sidebar-bottom">
           <div className="sync-card">
@@ -879,7 +902,7 @@ function DashboardApp({ sessionUser, publicConfig, onSettingsSaved, onLogout }: 
             <b>{say(locale, "账户 API", "Account API")}</b>
             <small>{apiError || (apiLoading ? say(locale, "正在加载账户数据…", "Loading account data…") : say(locale, "数据来自服务端", "Account data loaded from the server"))}</small>
           </div>
-          <button className={`nav-item help-item ${page === "help" ? "selected" : ""}`} aria-current={page === "help" ? "page" : undefined} title={say(locale, "帮助与支持", "Help & support")} onClick={() => { setPage("help"); setSearch(""); setEditor(null); setMobileOpen(false); }}><LifeBuoy size={18} /><span>{say(locale, "帮助与支持", "Help & support")}</span></button>
+          <button className={`nav-item help-item ${page === "help" ? "selected" : ""}`} aria-current={page === "help" ? "page" : undefined} data-short={navShort(locale, "help", say(locale, "帮助与支持", "Help & support"))} title={say(locale, "帮助与支持", "Help & support")} onClick={() => { setPage("help"); setSearch(""); setEditor(null); setMobileOpen(false); }}><LifeBuoy size={18} /><span>{say(locale, "帮助与支持", "Help & support")}</span></button>
           <div className="profile-row"><div className="avatar avatar-mint">{initials}</div><div className="profile-copy" title={sessionUser.email}><b>{sessionUser.email}</b><small>{admin ? t("adminPortal") : t("userPortal")}</small></div><button className="profile-more" aria-label={t("settings")} onClick={() => setPage("account")}><MoreHorizontal size={19} /></button></div>
         </div>
       </aside>
@@ -1172,6 +1195,10 @@ function AdminCreateForm({ kind, initial, nodes, plans, bindings = [], locale, o
       } else if (kind === "node") {
         if (!initial && !String(fields.password) && !String(fields.apiToken)) throw new Error(text("请填写面板密码或 API Token。", "Provide a panel password or API token."));
         body = { name: String(fields.name).trim(), region: fields.region, sortIndex: Number(fields.sortIndex), panelUrl: String(fields.panelUrl).trim(), publicAddress: fields.publicAddress, username: fields.username, basePath: fields.basePath, enabled: fields.enabled === true, ...(fields.password ? { password: fields.password } : {}), ...(fields.apiToken ? { apiToken: fields.apiToken } : {}) };
+        if (initial) {
+          const previous: Record<string, unknown> = { ...initial, sortIndex: (initial as AdminNodeRecord).sortIndex ?? 0 };
+          body = Object.fromEntries(Object.entries(body).filter(([name, value]) => value !== previous[name]));
+        }
       } else if (kind === "inbound") {
         const jsonSection = (name: string) => ["settingsExtra", "protocolFallbacks", "protocolAccounts", "wireguardPeers", "wireguardNoise"].includes(name) ? text("协议设置", "Protocol") : ["tcpRequest", "tcpResponse", "wsHeaders", "h2Headers", "upgradeHeaders", "xhttpHeaders", "hysteriaMasquerade", "xdriveTemplate", "xdriveXmux"].includes(name) ? text("传输方式", "Transport") : ["tlsCertificates", "tlsEchSockopt"].includes(name) ? text("传输安全", "Security") : text("高级设置", "Advanced");
         // Jump to the tab that owns a failing field, the way the 3X-UI form does.
