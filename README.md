@@ -17,19 +17,28 @@
   </p>
 
   <p>
+    <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager">
+      <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
+    </a>
+  </p>
+  <p><sub>一键部署只创建 Worker；D1、数据库迁移和 Worker secrets 仍需按下方说明手动完成。</sub></p>
+
+  <p>
+    <a href="./README.md">简体中文</a> ·
+    <a href="./readmes/README_zh-TW.md">繁體中文</a> ·
+    <a href="./readmes/README_en.md">English</a> ·
+    <a href="./readmes/README_ja.md">日本語</a> ·
+    <a href="./readmes/README_ko.md">한국어</a>
+  </p>
+
+  <p>
     <a href="#快速开始">快速开始</a> ·
     <a href="#部署到-cloudflare">部署</a> ·
-    <a href="#配置">配置</a> ·
-    <a href="#架构">架构</a> ·
-    <a href="#限制与安全">限制与安全</a>
+    <a href="#系统配置">配置</a> ·
+    <a href="#设计架构">架构</a> ·
+    <a href="#注意事项">注意事项</a>
   </p>
 </div>
-
-> [!IMPORTANT]
-> - **生产必须使用 D1**：流量计量、配额强制和支付结算锁依赖 D1 的原子能力；KV 模式只适合功能验证。
-> - **面板地址必须是 HTTPS 域名**：Cloudflare Workers 无法 fetch 裸 IP、私网或回环地址；面板凭据在 D1 中加密保存。
-> - **支付只接入 Waffo**：默认走沙箱，真实商户 Webhook / Inquiry 仍需在上线前完成端到端验证。
-> - **不要提交密钥**：`.dev.vars`、面板密码、Waffo 私钥和订阅令牌都不要进入仓库。
 
 ## 项目简介
 
@@ -43,14 +52,14 @@
 
 | 模块 | 能力 |
 | --- | --- |
-| **节点与入站** | 多节点注册、连通性探测；从 3X-UI 同步入站；按 3X-UI 结构分节的入站编辑器；未托管的 JSON 键保存时原样保留 |
+| **节点入站** | 多节点注册、连通性探测；从 3X-UI 同步入站；按 3X-UI 结构分节的入站编辑器；未托管的 JSON 键保存时原样保留 |
 | **订阅输出** | Clash / Mihomo YAML、V2Ray Base64、Shadowsocks SIP008；`选择节点` 手动 `select` 分组；大陆节点优先排序；ETag / 304 |
-| **用户与套餐** | 注册、登录、邮箱验证；免费套餐；套餐绑定入站；升级时余额优先抵扣；管理员可创建用户并直接分配套餐 |
-| **计量与配额** | 每分钟采样节点流量；支持倍率、流量重置；D1 幂等事件；耗尽后禁用客户端，失败在后续 Cron 重试 |
-| **订单与支付** | Waffo 下单、签名验证、Webhook、订单查询；D1 结算锁；人工充值 / 退款生成 `manual` 订单与余额流水 |
-| **运维** | 站内通知、可选邮件重试、推荐奖励、账户保留清理、Cron 生命周期维护、健康检查 |
+| **用户套餐** | 注册、登录、邮箱验证；免费套餐；套餐绑定入站；升级时余额优先抵扣；管理员可创建用户并直接分配套餐 |
+| **计量配额** | 每分钟采样节点流量；支持倍率、流量重置；D1 幂等事件；耗尽后禁用客户端，失败在后续 Cron 重试 |
+| **订单支付** | Waffo 下单、签名验证、Webhook、订单查询；D1 结算锁；人工充值 / 退款生成 `manual` 订单与余额流水 |
+| **运维工具** | 站内通知、可选邮件重试、推荐奖励、账户保留清理、Cron 生命周期维护、健康检查 |
 | **管理体验** | 12 种界面语言、阿拉伯语 RTL、亮色 / 暗色 / 跟随系统、主题预设、响应式布局、搜索与分页 |
-| **安全** | 会话 Cookie、同源校验、敏感字段加密、Turnstile 注册 / 签到校验、`/api/health` 能力检查 |
+| **安全防护** | 会话 Cookie、同源校验、敏感字段加密、Turnstile 注册 / 签到校验、`/api/health` 能力检查 |
 
 ### 订阅是怎么生成的
 
@@ -69,13 +78,13 @@ D1 中的用量事件是幂等的，配额禁用和支付结算都通过 lease �
 
 ### 前置要求
 
-- Node.js 20 或更高版本
-- npm
+- Node.js 20 或更高版本 + npm
 - 一个 Cloudflare 账号（部署到 Workers 时需要）
 - 一台可从公网访问的 3X-UI 面板（HTTPS 域名 + 用户名/密码或受限 API Token）
 - 可选：Waffo 沙箱商户配置（只测试支付时需要）
 
-### 本地开发
+<details>
+<summary><strong>本地开发</strong>（点击展开）</summary>
 
 ```bash
 git clone https://github.com/PIKACHUIM/3XUI-Manager.git
@@ -98,7 +107,9 @@ APP_ENCRYPTION_KEY="<至少 32 个字符，需长期保存>"
 
 业务配置（验证码、邮件、支付、签到、推荐奖励等）在管理员登录后的“系统设置”里填写，不写入 `.dev.vars`，也不要提交到仓库。
 
-### 首次初始化
+</details>
+
+### 配置系统
 
 1. 打开本地开发地址，使用登录页的“首次管理员初始化”。
 2. 输入 `ADMIN_BOOTSTRAP_TOKEN`，创建管理员账号；建成后该 Token 不再代替管理员登录凭据。
@@ -159,7 +170,7 @@ npm run deploy
 5. 在 Waffo 商户后台把通知地址设为 `https://<你的域名>/api/webhooks/waffo`，并用沙箱完成一次升级/回调验证。
 6. 检查 Cron 执行日志、流量采样、订阅输出和节点客户端状态。
 
-## 配置
+## 系统配置
 
 ### Worker 绑定与变量
 
@@ -173,7 +184,7 @@ npm run deploy
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 首次初始化 | 只用于创建第一个管理员 |
 | `APP_ENCRYPTION_KEY` | Secret | 是 | 加密面板凭据和系统设置敏感字段，至少 32 字符 |
 
-### 管理员系统设置
+### 系统设置
 
 | 设置 | 用途 |
 | --- | --- |
@@ -194,7 +205,7 @@ npm run deploy
 <details>
 <summary>展开查看 Waffo 配置、回调与交易行为</summary>
 
-缺任意一项必要配置时，下单会直接失败。支付相关配置全部通过管理员 `PUT /api/admin/settings` 保存，不读取同名 Worker 环境变量，也不会自动导入旧环境变量。
+支付相关配置全部通过管理员 `PUT /api/admin/settings` 保存
 
 | 设置 | 含义 |
 | --- | --- |
@@ -217,7 +228,7 @@ npm run deploy
 
 </details>
 
-## 架构
+## 设计架构
 
 ```mermaid
 flowchart LR
@@ -259,7 +270,8 @@ flowchart LR
 | 测试 | Vitest、Wrangler 本地 D1 platform |
 | 外部系统 | 3X-UI HTTP API、Waffo、Turnstile、Resend |
 
-### 项目结构
+<details>
+<summary><strong>项目结构</strong>（点击展开）</summary>
 
 ```text
 src/
@@ -275,7 +287,10 @@ public/          图标等静态资源
 wrangler.jsonc   Worker / D1 / KV / Cron 配置
 ```
 
-## 开发脚本
+</details>
+
+<details>
+<summary><strong>开发脚本</strong>（点击展开）</summary>
 
 | 命令 | 说明 |
 | --- | --- |
@@ -288,19 +303,21 @@ wrangler.jsonc   Worker / D1 / KV / Cron 配置
 | `npm run db:local` | 应用本地 D1 迁移 |
 | `npm run db:remote` | 应用远程 D1 迁移（人工确认后执行） |
 
-## 限制与安全
+</details>
 
-- **D1 是生产必需项**：KV 的 lease 是非原子读后写，不能提供 D1 级并发结算和事件幂等保证。当前支付 checkout 会拒绝非 D1 存储，流量采集会停止并报告不可用。
-- **不要声称 KV 模式具备可靠计量**：它只适合界面和流程验证，不适合生产配额或支付。
-- **平台兼容性**：项目基于 Wrangler、Workers bindings、D1 和 Cron 构建；Tencent EdgeOne、Alibaba Cloud ESA 等运行时尚未逐项验证，不能视为可原样移植。
+## 注意事项
+
+- **存储限制**：D1 是生产必需项,KV 的 lease 是非原子读后写，不能提供 D1 级并发结算和事件幂等保证。当前支付 checkout 会拒绝非 D1 存储，流量采集会停止并报告不可用。
+- **平台兼容**：项目基于 Wrangler、Workers bindings、D1 和 Cron 构建；Tencent EdgeOne、Alibaba Cloud ESA 等运行时尚未逐项验证，不能视为可原样移植。
 - **面板网络**：面板必须使用 HTTPS 域名。Worker 无法访问裸 IP、私网或回环地址；面板被防火墙拦截时，应放行 Cloudflare 出口或使用 Cloudflare Tunnel。
-- **配额执行有延迟**：Cron 每分钟运行，单轮最多 8 个节点、并发 4；节点更多时轮转采样，实际执行时间还受面板可用性和 D1 事件积压影响。
+- **执行延迟**：Cron 每分钟运行，单轮最多 8 个节点、并发 4；节点更多时轮转采样，实际执行时间还受面板可用性和 D1 事件积压影响。
 - **支付边界**：只接入 Waffo；沙箱为默认环境；真实商户 Webhook、完整 Inquiry payload 和 Waffo 重试行为未在商户环境端到端验证。支付成功跳转不能当作付款凭证，以签名验证后的服务端 Webhook 和订单状态为准。
-- **Turnstile / Resend**：仓库测试不包含真实第三方凭据；上线前必须配置有效 Site Key、Secret Key、widget 域名和发件域，并自行完成真实投递验证。
-- **迁移与回滚**：回滚 Worker 不会撤销已应用的 D1 migration。D1 Time Travel 恢复会原地覆盖数据库，属于破坏性操作，必须审批、停止写入、确认时间点并先保留当前状态。
+- **登录验证**：仓库测试不包含真实第三方凭据；上线前必须配置有效 Site Key、Secret Key、widget 域名和发件域，并自行完成真实投递验证。
+- **迁移回滚**：回滚 Worker 不会撤销已应用的 D1 migration。D1 Time Travel 恢复会原地覆盖数据库，属于破坏性操作，必须审批、停止写入、确认时间点并先保留当前状态。
 - **密钥管理**：`APP_ENCRYPTION_KEY` 必须长期保存；不要在日志、Issue、截图或提交记录中暴露密钥、面板密码、UUID、订阅令牌或支付私钥。
 
-## 常见问题
+<details>
+<summary><strong>常见问题</strong>（点击展开）</summary>
 
 | 现象 | 优先检查 |
 | --- | --- |
@@ -311,6 +328,8 @@ wrangler.jsonc   Worker / D1 / KV / Cron 配置
 | 注册后收不到验证邮件 | `resendApiKey` 与 `resendFrom` 是否同时配置，发件域是否已验证 |
 | 管理员无法登录 | 首次初始化只使用 `ADMIN_BOOTSTRAP_TOKEN`；之后使用创建的管理员邮箱和密码 |
 | 订阅更新后节点仍失败 | 在客户端重新更新订阅，而不是只刷新节点列表；再检查面板客户端与节点同步状态 |
+
+</details>
 
 ## 许可证
 
