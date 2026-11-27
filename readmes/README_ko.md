@@ -75,19 +75,27 @@ D1의 사용량 이벤트는 멱등입니다. 할당량 비활성화와 결제 �
 
 ## 빠른 배포
 
-| 플랫폼 | 원클릭 배포 | 상태 |
-| --- | :---: | --- |
-| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 검증됨 |
-| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 진입점 제공, 런타임 적응 필요 |
-| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 진입점 제공, 런타임 적응 필요 |
-| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 진입점 제공, 런타임 적응 필요 |
+| Cloudflare Workers | EdgeOne Makers | Aliyun ESA | Vercel |
+| :---: | :---: | :---: | :---: |
+| [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) |
 
-> 원클릭 배포는 플랫폼 프로젝트만 생성합니다. D1, 마이그레이션, secrets는 자동으로 만들지 않습니다. Cloudflare Workers가 현재 검증된 운영 경로이며, EdgeOne, ESA, Vercel은 Workers bindings, D1, Cron 적응이 별도로 필요하므로 그대로 실행된다고 볼 수 없습니다.
+> 원클릭 배포는 플랫폼 프로젝트만 생성합니다. 데이터베이스, 마이그레이션, secrets는 자동으로 만들지 않습니다. Cloudflare는 D1, EdgeOne/ESA는 Blob/KV, Vercel은 원격 MySQL을 사용합니다. [수동 배포](#수동-배포)와 [시스템 구성](#시스템-구성)을 참고하세요.
+
+### 플랫폼 스토리지
+
+| 플랫폼 | 스토리지 | 설정 |
+| --- | --- | --- |
+| Cloudflare Workers | D1(운영) / KV(제한) | `DB` binding；`STORAGE_DRIVER=d1` |
+| EdgeOne Makers | Blob / KV | `STORAGE_DRIVER=blob`；Blob SDK 또는 `EO_KV` / `EO_BLOB` binding |
+| Aliyun ESA | Blob / KV | `STORAGE_DRIVER=blob`；`ESA_BLOB` / `ESA_KV` binding |
+| Vercel / Node | 원격 MySQL | `STORAGE_DRIVER=mysql`；`MYSQL_URLS` 또는 `MYSQL_HOST/MYSQL_NAME` |
+
+Blob/KV와 MySQL 문서 모드는 로그인, 노드, 요금제, 구독, 클라이언트 동기화를 지원합니다. **원자적 트래픽 계측, 할당량 강제, Waffo 정산은 D1 전용**입니다. EdgeOne/ESA 엣지 런타임은 MySQL TCP에 직접 연결할 수 없고, Vercel Node 런타임은 원격 MySQL을 사용할 수 있습니다.
 
 ## 수동 배포
 
 <details>
-<summary><strong>수동 배포 단계 펼치기</strong> (로컬 개발, 설정, Cloudflare 배포)</summary>
+<summary><strong>수동 배포 단계 펼치기</strong> (로컬 개발, 설정, 멀티 플랫폼 배포)</summary>
 
 ### 사전 요구 사항
 
@@ -186,6 +194,27 @@ npm run deploy
 5. Waffo 알림 URL을 `https://<your-domain>/api/webhooks/waffo`로 설정하고 샌드박스에서 업그레이드 / 콜백을 검증합니다.
 6. Cron 로그, 트래픽 샘플링, 구독 출력, 패널 클라이언트 상태를 확인합니다.
 
+### Vercel 배포
+
+1. Vercel에 저장소를 가져옵니다. `vercel.json`이 `npm run build:vercel`, `dist/vercel`, API rewrite, 매분 `/api/cron`을 설정합니다.
+2. 원격 MySQL을 준비하고 `STORAGE_DRIVER=mysql`과 `MYSQL_URLS`(또는 `MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASS/MYSQL_NAME`)를 설정합니다.
+3. `APP_ENCRYPTION_KEY`, `ADMIN_BOOTSTRAP_TOKEN`, `CRON_SECRET`, 선택적 `APP_NAME`을 설정합니다.
+4. 앱이 `3xui_kv` 테이블을 자동 생성합니다. Vercel Hobby는 매분 Cron을 허용하지 않을 수 있으므로 `vercel.json`을 조정하거나 외부 스케줄러를 사용하세요.
+
+### EdgeOne 배포
+
+1. EdgeOne Makers에 저장소를 가져옵니다. `npm run build:edgeone`이 `dist/edgeone`과 `edge-functions/api/[[default]].js`를 생성합니다.
+2. Blob 또는 KV를 바인딩하고 `STORAGE_DRIVER=blob`을 설정합니다. Blob은 `EO_BLOB_NAMESPACE`, KV는 `EO_KV`를 사용합니다.
+3. `APP_ENCRYPTION_KEY`, `ADMIN_BOOTSTRAP_TOKEN`, `CRON_SECRET`을 설정합니다.
+4. EdgeOne `schedules`의 최소 간격은 1일입니다. 매분 동기화가 필요하면 외부 스케줄러에서 `/api/cron`을 호출하세요.
+
+### Aliyun ESA 배포
+
+1. ESA에 저장소를 가져옵니다. `esa.jsonc`는 `dist/esa-entry.js`와 `dist/esa` 정적 자산을 사용합니다.
+2. `ESA_BLOB` 또는 `ESA_KV`를 바인딩하고 `STORAGE_DRIVER=blob`을 설정합니다.
+3. `APP_ENCRYPTION_KEY`, `ADMIN_BOOTSTRAP_TOKEN`, `CRON_SECRET`을 설정합니다.
+4. ESA에는 매분 Cron이 없습니다. 외부 스케줄러에서 `x-cron-secret`과 함께 `/api/cron`을 호출하세요. ESA는 CPU/서브요청 제한이 낮으므로 무거운 동기화는 외부에 맡기세요.
+
 </details>
 
 ## 시스템 구성
@@ -194,13 +223,27 @@ npm run deploy
 
 | 이름 | 유형 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `DB` | D1 | 예 | 계측, 할당량, 결제 정산, 구독 데이터의 핵심 저장소 |
+| `DB` | D1 | Cloudflare | 계측, 할당량, 결제 정산, 구독 데이터의 핵심 저장소 |
 | `ASSETS` | Static Assets | 예 | React 관리 콘솔과 사용자 포털 정적 자산 |
-| `APP_KV` | KV | 아니요 | 제한된 배포 전용. D1의 원자성을 대체할 수 없음 |
-| `STORAGE_DRIVER` | Variable | 예 | 운영 환경은 `d1` |
+| `APP_KV` | KV | 아니요 | Cloudflare KV. 제한된 배포 전용 |
+| `STORAGE_DRIVER` | Variable | 예 | `d1` / `mysql` / `blob` / `kv` |
 | `APP_NAME` | Variable | 아니요 | 사이트 제목 기본값. 시스템 설정에서 변경 가능 |
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 최초 설정 | 첫 관리자 생성에만 사용 |
 | `APP_ENCRYPTION_KEY` | Secret | 예 | 패널 자격 증명과 민감 설정 암호화. 32자 이상 |
+
+### 플랫폼 환경 변수
+
+| 변수 | 플랫폼 | 설명 |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | 전체 | `d1` / `mysql` / `blob` / `kv` |
+| `MYSQL_URLS` | Vercel / Node | 우선 사용할 MySQL 연결 문자열 |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASS` / `MYSQL_NAME` | Vercel / Node | MySQL 분리 설정 |
+| `CRON_SECRET` | Vercel / EdgeOne / ESA | `/api/cron` 보호. Vercel은 Bearer로 전송 |
+| `EO_KV` / `EO_BLOB` | EdgeOne | 플랫폼 KV/Blob binding；`STORAGE_DRIVER=blob` |
+| `EO_BLOB_NAMESPACE` | EdgeOne | Blob 네임스페이스, 기본 `default` |
+| `ESA_BLOB` / `ESA_KV` | Aliyun ESA | ESA Blob/KV binding；`STORAGE_DRIVER=blob` |
+
+Vercel/Node는 `.env.example`, Cloudflare 로컬은 `.dev.vars.example`을 참고하세요. 실제 값을 커밋하지 마세요.
 
 <details>
 <summary><strong>시스템 설정</strong> (클릭하여 펼치기)</summary>
@@ -259,36 +302,35 @@ flowchart LR
     V["v2ray / SIP008"]
   end
 
-  subgraph Edge["Cloudflare"]
-    W["Worker + Hono API"]
-    A["React SPA / Static Assets"]
-    D[("D1")]
-    K[("KV (제한)")]
-    T["매분 Cron"]
+  subgraph Platforms["엣지 / 서버리스"]
+    E["Worker / Vercel / EdgeOne / ESA 진입점"]
+    A["Hono API + React 정적 자산"]
   end
 
+  S[("D1 / MySQL / Blob / KV")]
+  T["플랫폼 Cron / 외부 스케줄러"]
   X["3X-UI 패널"]
   P["Waffo"]
   M["Resend / Turnstile"]
 
-  B --> W
-  C --> W
-  V --> W
-  W --> A
-  W --> D
-  W --> K
-  T --> W
-  W --> X
-  W --> P
-  W --> M
+  B --> E
+  C --> E
+  V --> E
+  E --> A
+  E --> S
+  T --> E
+  E --> X
+  E --> P
+  E --> M
 ```
 
 | 계층 | 기술 |
 | --- | --- |
-| 런타임 | Cloudflare Workers, Wrangler |
-| 백엔드 | Hono, TypeScript, D1, KV(제한) |
+| 런타임 | Cloudflare Workers, Vercel Node, EdgeOne Edge Functions, ESA Edge Functions |
+| 백엔드 | Hono, TypeScript |
+| 스토리지 | D1(원자성), 원격 MySQL, EdgeOne/ESA Blob 또는 KV |
 | 프런트엔드 | React 19, Vite, Tailwind CSS 4, Recharts, Lucide |
-| 테스트 | Vitest, Wrangler 로컬 D1 platform |
+| 테스트 | Vitest, Wrangler 로컬 D1 platform, 스토리지 어댑터 테스트 |
 | 외부 시스템 | 3X-UI HTTP API, Waffo, Turnstile, Resend |
 
 <details>
@@ -296,16 +338,23 @@ flowchart LR
 
 ```text
 src/
-├─ api/          Hono 라우트: auth / user / admin / payments / subscriptions
+├─ app.ts        Hono 앱과 /api/cron
+├─ api/          라우트: auth / user / admin / payments / subscriptions
 ├─ services/     과금, 트래픽, 수명 주기, 알림, 구독, 노드 동기화, WireGuard
 ├─ adapters/     외부 시스템: 3X-UI, Waffo
 ├─ domain/       타입, 기본값, 암호화, WireGuard
-├─ storage/      D1 / KV 문서 저장소
-├─ worker/       Worker 진입점과 Cron 스케줄
+├─ storage/      D1 / MySQL / Blob / KV 어댑터
+├─ platform/     Vercel / EdgeOne / ESA 진입점과 환경 매핑
+├─ worker/       Cloudflare 진입점과 공유 Cron
 └─ client/       React 관리 콘솔과 사용자 포털
+api/             Vercel Web Handler와 Cron
 migrations/      D1 SQL 마이그레이션
 public/          아이콘 등 정적 자산
-wrangler.jsonc   Worker / D1 / KV / Cron 설정
+scripts/         EdgeOne / ESA 빌드 스크립트
+wrangler.jsonc   Cloudflare Worker / D1 / KV / Cron
+vercel.json      Vercel 빌드, 라우팅, Cron
+edgeone.json     EdgeOne 빌드와 정적 자산
+esa.jsonc        ESA 진입점과 정적 자산
 ```
 
 </details>
@@ -317,6 +366,9 @@ wrangler.jsonc   Worker / D1 / KV / Cron 설정
 | --- | --- |
 | `npm run dev` | 로컬 Workers 미리보기 시작 |
 | `npm run build` | Worker와 프런트엔드 정적 자산 빌드 |
+| `npm run build:vercel` | Vercel 정적 프런트엔드 빌드 |
+| `npm run build:edgeone` | EdgeOne 프런트엔드와 엣지 함수 빌드 |
+| `npm run build:esa` | ESA 프런트엔드와 엣지 함수 빌드 |
 | `npm run preview` | 빌드된 `dist` 미리보기. 먼저 `build` 필요 |
 | `npm run deploy` | 빌드 후 Cloudflare에 배포 |
 | `npm run typecheck` | TypeScript 타입 검사 |
@@ -331,13 +383,13 @@ wrangler.jsonc   Worker / D1 / KV / Cron 설정
 <details>
 <summary>클릭하여 주의 사항 펼치기</summary>
 
-- **저장소 제한**: 운영 환경에는 D1이 필수입니다. KV의 lease는 비원자적 read-modify-write이며 D1 수준의 동시 정산과 이벤트 멱등성을 제공할 수 없습니다. 현재 checkout은 비 D1 저장소를 거부하고 트래픽 수집은 중단되어 사용할 수 없음을 보고합니다.
-- **플랫폼 호환성**: Wrangler, Workers bindings, D1, Cron에 의존합니다. Tencent EdgeOne, Alibaba Cloud ESA, Vercel 같은 런타임은 검증되지 않았으며 그대로 실행된다고 볼 수 없습니다.
-- **패널 네트워크**: 패널은 HTTPS 호스트명을 사용해야 합니다. Worker는 원시 IP, 사설 네트워크, 루프백 주소에 접근할 수 없습니다. 방화벽이 막으면 Cloudflare egress를 허용하거나 Cloudflare Tunnel을 사용하세요.
-- **실행 지연**: Cron은 매분 실행되며 한 번에 최대 8개 노드, 동시성 4입니다. 노드가 많으면 순환 처리하며 실제 시점은 패널 가용성과 D1 이벤트 적체에도 영향을 받습니다.
-- **결제 경계**: Waffo만 연동하며 기본은 샌드박스입니다. 실제 가맹점 Webhook, 전체 Inquiry payload, Waffo 재시도는 종단 간 검증되지 않았습니다. 결제 성공 리디렉션을 결제 증거로 보지 말고 서명 검증된 서버 Webhook과 주문 상태를 신뢰하세요.
+- **저장소 제한**: D1은 원자적 트래픽 계측, 할당량 강제, Waffo 정산을 제공합니다. Blob/KV와 MySQL 문서 모드는 로그인, 노드, 요금제, 구독, 클라이언트 동기화를 지원하지만 checkout, 출석 체크, 원자적 잔액 조정은 비활성화됩니다.
+- **플랫폼 호환성**: Vercel, EdgeOne, ESA 진입점과 빌드 설정을 제공합니다. Vercel은 원격 MySQL, EdgeOne/ESA는 Blob/KV가 필요합니다. 실제 플랫폼에서 바인딩, secrets, 종단 간 검증을 완료하세요.
+- **패널 네트워크**: 패널은 HTTPS 호스트명을 사용해야 합니다. 각 런타임은 원시 IP, 사설 네트워크, 루프백 주소에 접근할 수 없습니다. 차단 시 플랫폼 egress를 허용하거나 Cloudflare Tunnel을 사용하세요.
+- **실행 지연**: Cloudflare/Vercel Cron은 매분 실행됩니다. EdgeOne schedules는 최소 1일, ESA에는 매분 Cron이 없으므로 외부에서 `/api/cron`을 호출해야 합니다. 한 번에 최대 8개 노드, 동시성 4입니다.
+- **결제 경계**: Waffo만 연동하며 정산은 D1 전용이고 기본은 샌드박스입니다. 실제 가맹점 Webhook, 전체 Inquiry payload, Waffo 재시도는 종단 간 검증되지 않았습니다. 결제 성공 리디렉션을 결제 증거로 보지 말고 서명 검증된 서버 Webhook과 주문 상태를 신뢰하세요.
 - **로그인 검증**: 저장소 테스트에는 실제 제3자 자격 증명이 없습니다. 유효한 Site Key, Secret Key, widget 호스트명, 발신 도메인을 설정하고 운영 전에 실제 발송을 검증하세요.
-- **마이그레이션과 롤백**: Worker를 롤백해도 적용된 D1 migration은 되돌아가지 않습니다. D1 Time Travel 복원은 데이터베이스를 덮어쓰는 파괴적 작업입니다. 승인, 쓰기 중지, 시점 확인, 현재 상태 보존을 먼저 해야 합니다.
+- **마이그레이션과 롤백**: Worker를 롤백해도 적용된 D1 migration은 되돌아가지 않습니다. D1 Time Travel 복원은 파괴적입니다. MySQL/Blob/KV 문서 모드는 자체 테이블/키를 만들며 D1 Time Travel에 해당하는 복원이 없습니다.
 - **Secret 관리**: `APP_ENCRYPTION_KEY`는 영구 보관하세요. 키, 패널 비밀번호, UUID, 구독 토큰, 결제 개인 키를 로그, Issue, 스크린샷, 커밋에 노출하지 마세요.
 
 </details>

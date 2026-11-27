@@ -2,7 +2,7 @@ import type { RuntimeEnv } from "../env";
 import { readSetting, servesPlan, writeSetting } from "../domain/defaults";
 import type { ClientMapping, Inbound, InboundNodeBinding, NodeRecord, User } from "../domain/types";
 import type { DocumentStore } from "../storage/store";
-import { D1Store } from "../storage/d1";
+import { getStore } from "../storage";
 import { ThreeXuiClient, clientQuota, quotaMatches, readPanelClients, type XuiInbound } from "../adapters/xui/client";
 import { listCollection } from "./xui-sync";
 import { syncWireGuardPeer } from "./wireguard";
@@ -204,8 +204,7 @@ export async function syncNode(store: DocumentStore, env: RuntimeEnv, node: Node
  */
 export async function runNodeSync(env: RuntimeEnv): Promise<{ nodes: number; written: number; unchanged: number; disabled: number; failed: number }> {
   const summary = { nodes: 0, written: 0, unchanged: 0, disabled: 0, failed: 0 };
-  if ((env.STORAGE_DRIVER ?? "d1").toLowerCase() !== "d1" || !env.DB) return summary;
-  const store = new D1Store(env.DB);
+  const store = getStore(env);
   const owner = crypto.randomUUID();
   if (!(await store.acquireLease(JOB_NAME, owner, Date.now() + LEASE_MS))) return summary;
   try {

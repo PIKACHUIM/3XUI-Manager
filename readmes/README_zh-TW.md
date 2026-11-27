@@ -75,19 +75,27 @@ D1 中的用量事件是冪等的，配額停用與支付結算都透過 lease �
 
 ## 快速部署
 
-| 平台 | 一鍵部署 | 狀態 |
-| --- | :---: | --- |
-| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 已驗證 |
-| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口已提供，執行環境待適配 |
-| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 入口已提供，執行環境待適配 |
-| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口已提供，執行環境待適配 |
+| Cloudflare Workers | EdgeOne Makers | Aliyun ESA | Vercel |
+| :---: | :---: | :---: | :---: |
+| [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) |
 
-> 一鍵部署只會建立平台專案，不會自動建立 D1、執行遷移或填寫 secrets。Cloudflare Workers 是目前已驗證的生產路徑；EdgeOne、ESA、Vercel 需要自行適配 Workers bindings、D1 與 Cron，不能視為可直接執行。
+> 一鍵部署只會建立平台專案，不會自動建立資料庫、執行遷移或填寫 secrets。Cloudflare 使用 D1，EdgeOne/ESA 使用 Blob/KV，Vercel 使用遠端 MySQL；請參考 [手動部署](#手動部署) 與 [系統設定](#系統設定)。
+
+### 平台儲存
+
+| 平台 | 儲存 | 設定 |
+| --- | --- | --- |
+| Cloudflare Workers | D1（生產）/ KV（受限） | `DB` binding；`STORAGE_DRIVER=d1` |
+| EdgeOne Makers | Blob / KV | `STORAGE_DRIVER=blob`；Blob SDK 或 `EO_KV` / `EO_BLOB` binding |
+| Aliyun ESA | Blob / KV | `STORAGE_DRIVER=blob`；`ESA_BLOB` / `ESA_KV` binding |
+| Vercel / Node | 遠端 MySQL | `STORAGE_DRIVER=mysql`；`MYSQL_URLS` 或 `MYSQL_HOST/MYSQL_NAME` |
+
+Blob/KV 與 MySQL 文件模式支援登入、節點、方案、訂閱和用戶端同步；**原子流量計量、配額強制與 Waffo 結算仍只支援 D1**。EdgeOne/ESA 邊緣執行環境不能直接連 MySQL，Vercel 的 Node 執行環境可以使用遠端 MySQL。
 
 ## 手動部署
 
 <details>
-<summary><strong>展開手動部署步驟</strong>（本地開發、設定與 Cloudflare 部署）</summary>
+<summary><strong>展開手動部署步驟</strong>（本地開發、設定與多平台部署）</summary>
 
 ### 前置需求
 
@@ -186,6 +194,27 @@ npm run deploy
 5. 在 Waffo 商戶後台把通知網址設為 `https://<你的網域>/api/webhooks/waffo`，並用沙箱完成一次升級/回呼驗證。
 6. 檢查 Cron 執行日誌、流量取樣、訂閱輸出與節點用戶端狀態。
 
+### 部署到 Vercel
+
+1. 在 Vercel 匯入倉庫；`vercel.json` 已指定 `npm run build:vercel`、`dist/vercel`、API rewrite 與每分鐘 `/api/cron`。
+2. 準備遠端 MySQL，設定 `STORAGE_DRIVER=mysql` 與 `MYSQL_URLS`（或 `MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASS/MYSQL_NAME`）。
+3. 設定 `APP_ENCRYPTION_KEY`、`ADMIN_BOOTSTRAP_TOKEN`、`CRON_SECRET` 與可選 `APP_NAME`。
+4. 應用會自動建立文件表 `3xui_kv`；Vercel Hobby 可能不允許每分鐘 Cron，請依方案調整 `vercel.json` 或改用外部排程。
+
+### 部署到 EdgeOne
+
+1. 在 EdgeOne Makers 匯入倉庫；`npm run build:edgeone` 產生 `dist/edgeone` 與 `edge-functions/api/[[default]].js`。
+2. 綁定 Blob 或 KV，設定 `STORAGE_DRIVER=blob`；Blob 命名空間可用 `EO_BLOB_NAMESPACE`，KV binding 為 `EO_KV`。
+3. 設定 `APP_ENCRYPTION_KEY`、`ADMIN_BOOTSTRAP_TOKEN`、`CRON_SECRET`。
+4. EdgeOne 原生 `schedules` 最小間隔為一天；需要分鐘級同步時，用外部排程請求 `/api/cron`。
+
+### 部署到 Aliyun ESA
+
+1. 在 ESA 控制台匯入倉庫；`esa.jsonc` 使用 `dist/esa-entry.js` 與 `dist/esa` 靜態資源。
+2. 綁定 `ESA_BLOB` 或 `ESA_KV`，設定 `STORAGE_DRIVER=blob`。
+3. 設定 `APP_ENCRYPTION_KEY`、`ADMIN_BOOTSTRAP_TOKEN`、`CRON_SECRET`。
+4. ESA 沒有原生分鐘級 Cron；用外部排程向 `/api/cron` 發送 `x-cron-secret`。ESA 邊緣函數有較低 CPU 與子請求限制，建議把重任務留給外部排程器或 Cloudflare Worker。
+
 </details>
 
 ## 系統設定
@@ -194,13 +223,27 @@ npm run deploy
 
 | 名稱 | 類型 | 必需 | 說明 |
 | --- | --- | --- | --- |
-| `DB` | D1 | 是 | 生產計量、配額、支付結算與訂閱資料的核心儲存 |
+| `DB` | D1 | Cloudflare | 計量、配額、支付結算與訂閱資料的核心儲存 |
 | `ASSETS` | Static Assets | 是 | React 管理端與使用者端靜態資源 |
-| `APP_KV` | KV | 否 | 僅用於能力受限的部署；不能替代 D1 的原子能力 |
-| `STORAGE_DRIVER` | Variable | 是 | 生產設為 `d1` |
+| `APP_KV` | KV | 否 | Cloudflare KV；僅用於能力受限的部署 |
+| `STORAGE_DRIVER` | Variable | 是 | `d1` / `mysql` / `blob` / `kv` |
 | `APP_NAME` | Variable | 否 | 站點標題預設值，可在系統設定覆寫 |
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 首次初始化 | 只用於建立第一個管理員 |
 | `APP_ENCRYPTION_KEY` | Secret | 是 | 加密面板憑證與系統設定敏感欄位，至少 32 字元 |
+
+### 平台環境變數
+
+| 變數 | 平台 | 說明 |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | 全部 | `d1` / `mysql` / `blob` / `kv` |
+| `MYSQL_URLS` | Vercel / Node | 優先使用的 MySQL 連線字串 |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASS` / `MYSQL_NAME` | Vercel / Node | 分項 MySQL 設定 |
+| `CRON_SECRET` | Vercel / EdgeOne / ESA | 保護 `/api/cron`；Vercel 會以 Bearer 發送 |
+| `EO_KV` / `EO_BLOB` | EdgeOne | 平台 KV/Blob binding；`STORAGE_DRIVER=blob` |
+| `EO_BLOB_NAMESPACE` | EdgeOne | Blob 命名空間，預設 `default` |
+| `ESA_BLOB` / `ESA_KV` | Aliyun ESA | ESA Blob/KV binding；`STORAGE_DRIVER=blob` |
+
+Vercel/Node 變數範本見 `.env.example`；Cloudflare 本地變數範本見 `.dev.vars.example`。不要把真實值提交到倉庫。
 
 <details>
 <summary><strong>系統設定</strong>（點擊展開）</summary>
@@ -259,36 +302,35 @@ flowchart LR
     V["v2ray / SIP008"]
   end
 
-  subgraph Edge["Cloudflare"]
-    W["Worker + Hono API"]
-    A["React SPA / Static Assets"]
-    D[("D1")]
-    K[("KV（受限）")]
-    T["Cron 每分鐘"]
+  subgraph Platforms["邊緣 / Serverless"]
+    E["Worker / Vercel / EdgeOne / ESA 入口"]
+    A["Hono API + React 靜態資源"]
   end
 
+  S[("D1 / MySQL / Blob / KV")]
+  T["平台 Cron / 外部排程"]
   X["3X-UI 面板叢集"]
   P["Waffo"]
   M["Resend / Turnstile"]
 
-  B --> W
-  C --> W
-  V --> W
-  W --> A
-  W --> D
-  W --> K
-  T --> W
-  W --> X
-  W --> P
-  W --> M
+  B --> E
+  C --> E
+  V --> E
+  E --> A
+  E --> S
+  T --> E
+  E --> X
+  E --> P
+  E --> M
 ```
 
 | 層 | 技術 |
 | --- | --- |
-| 執行環境 | Cloudflare Workers、Wrangler |
-| 後端 | Hono、TypeScript、D1、KV（受限） |
+| 執行環境 | Cloudflare Workers、Vercel Node、EdgeOne Edge Functions、ESA Edge Functions |
+| 後端 | Hono、TypeScript |
+| 儲存 | D1（原子能力）、遠端 MySQL、EdgeOne/ESA Blob 或 KV |
 | 前端 | React 19、Vite、Tailwind CSS 4、Recharts、Lucide |
-| 測試 | Vitest、Wrangler 本地 D1 platform |
+| 測試 | Vitest、Wrangler 本地 D1 platform、儲存適配器測試 |
 | 外部系統 | 3X-UI HTTP API、Waffo、Turnstile、Resend |
 
 <details>
@@ -296,16 +338,23 @@ flowchart LR
 
 ```text
 src/
-├─ api/          Hono 路由：auth / user / admin / payments / subscriptions
-├─ services/     業務：計費、流量、生命週期、通知、訂閱、節點同步、WireGuard
+├─ app.ts        Hono 應用與 /api/cron
+├─ api/          路由：auth / user / admin / payments / subscriptions
+├─ services/     計費、流量、生命週期、通知、訂閱、節點同步、WireGuard
 ├─ adapters/     外部系統：3X-UI、Waffo
 ├─ domain/       型別、預設值、加密、WireGuard
-├─ storage/      D1 / KV 文件儲存
-├─ worker/       Worker 入口與 Cron 排程
+├─ storage/      D1 / MySQL / Blob / KV 儲存適配器
+├─ platform/     Vercel / EdgeOne / ESA 入口與環境映射
+├─ worker/       Cloudflare 入口與共享 Cron
 └─ client/       React 管理端與使用者端
+api/             Vercel Web Handler 與 Cron
 migrations/      D1 SQL 遷移
 public/          圖示等靜態資源
-wrangler.jsonc   Worker / D1 / KV / Cron 設定
+scripts/         EdgeOne / ESA 打包腳本
+wrangler.jsonc   Cloudflare Worker / D1 / KV / Cron
+vercel.json      Vercel 建置、路由與 Cron
+edgeone.json     EdgeOne 建置與靜態資源
+esa.jsonc        ESA 入口與靜態資源
 ```
 
 </details>
@@ -317,6 +366,9 @@ wrangler.jsonc   Worker / D1 / KV / Cron 設定
 | --- | --- |
 | `npm run dev` | 啟動本地 Workers 預覽 |
 | `npm run build` | 建置 Worker 與前端靜態資源 |
+| `npm run build:vercel` | 建置 Vercel 靜態前端 |
+| `npm run build:edgeone` | 建置 EdgeOne 靜態前端與邊緣函數 |
+| `npm run build:esa` | 建置 ESA 靜態前端與邊緣函數 |
 | `npm run preview` | 使用 `dist` 預覽建置結果，需先執行 `build` |
 | `npm run deploy` | 建置並發布到 Cloudflare |
 | `npm run typecheck` | TypeScript 型別檢查 |
@@ -331,13 +383,13 @@ wrangler.jsonc   Worker / D1 / KV / Cron 設定
 <details>
 <summary>點擊展開查看注意事項</summary>
 
-- **儲存限制**：D1 是生產必需項，KV 的 lease 是非原子讀後寫，不能提供 D1 級併發結算與事件冪等保證。目前支付 checkout 會拒絕非 D1 儲存，流量採集會停止並回報不可用。
-- **平台相容**：專案基於 Wrangler、Workers bindings、D1 與 Cron 建置；Tencent EdgeOne、Alibaba Cloud ESA、Vercel 等執行環境尚未逐項驗證，不能視為可原樣移植。
-- **面板網路**：面板必須使用 HTTPS 網域。Worker 無法存取裸 IP、私有網路或回環位址；面板被防火牆阻擋時，應放行 Cloudflare 出口或使用 Cloudflare Tunnel。
-- **執行延遲**：Cron 每分鐘執行，單輪最多 8 個節點、併發 4；節點更多時輪替取樣，實際執行時間還受面板可用性與 D1 事件積壓影響。
-- **支付邊界**：只接入 Waffo；沙箱為預設環境；真實商戶 Webhook、完整 Inquiry payload 與 Waffo 重試行為未在商戶環境端到端驗證。支付成功跳轉不能當作付款憑證，以簽章驗證後的伺服器 Webhook 與訂單狀態為準。
+- **儲存限制**：D1 仍提供原子流量計量、配額強制與 Waffo 結算；Blob/KV 與 MySQL 文件模式支援登入、節點、方案、訂閱和用戶端同步，但停用 checkout、簽到與原子餘額調整。
+- **平台相容**：已提供 Vercel、EdgeOne、ESA 入口與建置設定；Vercel 需要遠端 MySQL，EdgeOne/ESA 使用 Blob/KV。仍需在真實平台綁定資源、設定 secrets 並完成端到端驗證。
+- **面板網路**：面板必須使用 HTTPS 網域。平台執行環境無法存取裸 IP、私有網路或回環位址；面板被防火牆阻擋時，應放行平台出口或使用 Cloudflare Tunnel。
+- **執行延遲**：Cloudflare/Vercel 的 Cron 每分鐘執行；EdgeOne 原生 schedules 最小間隔為一天，ESA 沒有原生分鐘級 Cron，兩者需外部排程呼叫 `/api/cron`。單輪最多 8 個節點、併發 4。
+- **支付邊界**：只接入 Waffo，且結算只在 D1 儲存下啟用；沙箱為預設環境。真實商戶 Webhook、完整 Inquiry payload 與 Waffo 重試行為未在商戶環境端到端驗證。支付成功跳轉不能當作付款憑證，以簽章驗證後的伺服器 Webhook 與訂單狀態為準。
 - **登入驗證**：倉庫測試不包含真實第三方憑證；上線前必須設定有效 Site Key、Secret Key、widget 網域與寄件網域，並自行完成真實投遞驗證。
-- **遷移回滾**：回滾 Worker 不會撤銷已套用的 D1 migration。D1 Time Travel 還原會原地覆蓋資料庫，屬於破壞性操作，必須審批、停止寫入、確認時間點並先保留目前狀態。
+- **遷移回滾**：回滾 Worker 不會撤銷已套用的 D1 migration。D1 Time Travel 還原會原地覆蓋資料庫，屬於破壞性操作。MySQL/Blob/KV 文件模式自行建立資料表或鍵值，沒有 D1 Time Travel 等價還原。
 - **密鑰管理**：`APP_ENCRYPTION_KEY` 必須長期保存；不要在日誌、Issue、截圖或提交記錄中暴露密鑰、面板密碼、UUID、訂閱 Token 或支付私鑰。
 
 </details>

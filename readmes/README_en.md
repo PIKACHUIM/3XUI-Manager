@@ -75,19 +75,27 @@ Usage events in D1 are idempotent. Quota disabling and payment settlement are se
 
 ## Quick deploy
 
-| Platform | One-click deploy | Status |
-| --- | :---: | --- |
-| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | Verified |
-| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | Entry provided; runtime adaptation pending |
-| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | Entry provided; runtime adaptation pending |
-| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | Entry provided; runtime adaptation pending |
+| Cloudflare Workers | EdgeOne Makers | Aliyun ESA | Vercel |
+| :---: | :---: | :---: | :---: |
+| [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) |
 
-> One-click deploy only creates the platform project. It does not create D1, run migrations or fill secrets. Cloudflare Workers is the verified production path; EdgeOne, ESA and Vercel require adapting Workers bindings, D1 and Cron and cannot be treated as runnable as-is.
+> One-click deploy only creates the platform project. It does not create a database, run migrations or fill secrets. Cloudflare uses D1, EdgeOne/ESA use Blob/KV, and Vercel uses remote MySQL. See [Manual deployment](#manual-deployment) and [Configuration](#configuration).
+
+### Platform storage
+
+| Platform | Storage | Configuration |
+| --- | --- | --- |
+| Cloudflare Workers | D1 (production) / KV (limited) | `DB` binding; `STORAGE_DRIVER=d1` |
+| EdgeOne Makers | Blob / KV | `STORAGE_DRIVER=blob`; Blob SDK or `EO_KV` / `EO_BLOB` binding |
+| Aliyun ESA | Blob / KV | `STORAGE_DRIVER=blob`; `ESA_BLOB` / `ESA_KV` binding |
+| Vercel / Node | Remote MySQL | `STORAGE_DRIVER=mysql`; `MYSQL_URLS` or `MYSQL_HOST/MYSQL_NAME` |
+
+Blob/KV and MySQL document mode support login, nodes, plans, subscriptions and client sync. **Atomic traffic metering, quota enforcement and Waffo settlement remain D1-only.** EdgeOne/ESA edge runtimes cannot open MySQL TCP connections; Vercel's Node runtime can.
 
 ## Manual deployment
 
 <details>
-<summary><strong>Expand manual deployment steps</strong> (local development, configuration and Cloudflare deploy)</summary>
+<summary><strong>Expand manual deployment steps</strong> (local development, configuration and multi-platform deploy)</summary>
 
 ### Requirements
 
@@ -186,6 +194,27 @@ npm run deploy
 5. Set the Waffo notification URL to `https://<your-domain>/api/webhooks/waffo` and complete a sandbox upgrade/callback test.
 6. Check Cron logs, traffic sampling, subscription output and panel client state.
 
+### Deploy to Vercel
+
+1. Import the repository into Vercel. `vercel.json` sets `npm run build:vercel`, `dist/vercel`, API rewrites and a per-minute `/api/cron`.
+2. Prepare remote MySQL and set `STORAGE_DRIVER=mysql` plus `MYSQL_URLS` (or `MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASS/MYSQL_NAME`).
+3. Set `APP_ENCRYPTION_KEY`, `ADMIN_BOOTSTRAP_TOKEN`, `CRON_SECRET` and optional `APP_NAME`.
+4. The app creates the `3xui_kv` document table automatically. Vercel Hobby may not allow a per-minute Cron; adjust `vercel.json` or use an external scheduler.
+
+### Deploy to EdgeOne
+
+1. Import the repository into EdgeOne Makers. `npm run build:edgeone` produces `dist/edgeone` and `edge-functions/api/[[default]].js`.
+2. Bind Blob or KV and set `STORAGE_DRIVER=blob`; use `EO_BLOB_NAMESPACE` for Blob or `EO_KV` for KV.
+3. Set `APP_ENCRYPTION_KEY`, `ADMIN_BOOTSTRAP_TOKEN`, `CRON_SECRET`.
+4. EdgeOne native `schedules` have a one-day minimum interval. Use an external scheduler for per-minute `/api/cron`.
+
+### Deploy to Aliyun ESA
+
+1. Import the repository into ESA. `esa.jsonc` uses `dist/esa-entry.js` and the `dist/esa` assets.
+2. Bind `ESA_BLOB` or `ESA_KV` and set `STORAGE_DRIVER=blob`.
+3. Set `APP_ENCRYPTION_KEY`, `ADMIN_BOOTSTRAP_TOKEN`, `CRON_SECRET`.
+4. ESA has no native per-minute Cron. Call `/api/cron` from an external scheduler with `x-cron-secret`. ESA edge functions have tight CPU/subrequest limits; keep heavy sync work on an external scheduler or Cloudflare Worker.
+
 </details>
 
 ## Configuration
@@ -194,13 +223,27 @@ npm run deploy
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| `DB` | D1 | Yes | Core storage for metering, quota, payment settlement and subscriptions |
+| `DB` | D1 | Cloudflare | Core storage for metering, quota, payment settlement and subscriptions |
 | `ASSETS` | Static Assets | Yes | React dashboard and user portal assets |
-| `APP_KV` | KV | No | Only for limited deployments; cannot replace D1 atomicity |
-| `STORAGE_DRIVER` | Variable | Yes | Set to `d1` in production |
+| `APP_KV` | KV | No | Cloudflare KV for limited deployments |
+| `STORAGE_DRIVER` | Variable | Yes | `d1` / `mysql` / `blob` / `kv` |
 | `APP_NAME` | Variable | No | Default site title, overridable in System settings |
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | First setup | Used only to create the first administrator |
 | `APP_ENCRYPTION_KEY` | Secret | Yes | Encrypts panel credentials and sensitive settings; at least 32 characters |
+
+### Platform environment variables
+
+| Variable | Platform | Description |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | All | `d1` / `mysql` / `blob` / `kv` |
+| `MYSQL_URLS` | Vercel / Node | Preferred MySQL connection string |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASS` / `MYSQL_NAME` | Vercel / Node | Split MySQL configuration |
+| `CRON_SECRET` | Vercel / EdgeOne / ESA | Protects `/api/cron`; Vercel sends it as a Bearer token |
+| `EO_KV` / `EO_BLOB` | EdgeOne | Platform KV/Blob binding; `STORAGE_DRIVER=blob` |
+| `EO_BLOB_NAMESPACE` | EdgeOne | Blob namespace, default `default` |
+| `ESA_BLOB` / `ESA_KV` | Aliyun ESA | ESA Blob/KV binding; `STORAGE_DRIVER=blob` |
+
+See `.env.example` for Vercel/Node and `.dev.vars.example` for Cloudflare. Never commit real values.
 
 <details>
 <summary><strong>System settings</strong> (click to expand)</summary>
@@ -259,36 +302,35 @@ flowchart LR
     V["v2ray / SIP008"]
   end
 
-  subgraph Edge["Cloudflare"]
-    W["Worker + Hono API"]
-    A["React SPA / Static Assets"]
-    D[("D1")]
-    K[("KV (limited)")]
-    T["Cron every minute"]
+  subgraph Platforms["Edge / Serverless"]
+    E["Worker / Vercel / EdgeOne / ESA entry"]
+    A["Hono API + React assets"]
   end
 
+  S[("D1 / MySQL / Blob / KV")]
+  T["Platform cron / external scheduler"]
   X["3X-UI panels"]
   P["Waffo"]
   M["Resend / Turnstile"]
 
-  B --> W
-  C --> W
-  V --> W
-  W --> A
-  W --> D
-  W --> K
-  T --> W
-  W --> X
-  W --> P
-  W --> M
+  B --> E
+  C --> E
+  V --> E
+  E --> A
+  E --> S
+  T --> E
+  E --> X
+  E --> P
+  E --> M
 ```
 
 | Layer | Technology |
 | --- | --- |
-| Runtime | Cloudflare Workers, Wrangler |
-| Backend | Hono, TypeScript, D1, KV (limited) |
+| Runtime | Cloudflare Workers, Vercel Node, EdgeOne Edge Functions, ESA Edge Functions |
+| Backend | Hono, TypeScript |
+| Storage | D1 (atomic), remote MySQL, EdgeOne/ESA Blob or KV |
 | Frontend | React 19, Vite, Tailwind CSS 4, Recharts, Lucide |
-| Testing | Vitest, Wrangler local D1 platform |
+| Testing | Vitest, Wrangler local D1 platform, storage adapter tests |
 | External systems | 3X-UI HTTP API, Waffo, Turnstile, Resend |
 
 <details>
@@ -296,16 +338,23 @@ flowchart LR
 
 ```text
 src/
-├─ api/          Hono routes: auth / user / admin / payments / subscriptions
+├─ app.ts        Hono app and /api/cron
+├─ api/          routes: auth / user / admin / payments / subscriptions
 ├─ services/     billing, traffic, lifecycle, notifications, subscriptions, node sync, WireGuard
 ├─ adapters/     external systems: 3X-UI, Waffo
 ├─ domain/       types, defaults, encryption, WireGuard
-├─ storage/      D1 / KV document storage
-├─ worker/       Worker entry and Cron scheduling
+├─ storage/      D1 / MySQL / Blob / KV adapters
+├─ platform/     Vercel / EdgeOne / ESA entries and env mapping
+├─ worker/       Cloudflare entry and shared cron jobs
 └─ client/       React dashboard and user portal
+api/             Vercel Web Handler and cron function
 migrations/      D1 SQL migrations
 public/          icons and static assets
-wrangler.jsonc   Worker / D1 / KV / Cron configuration
+scripts/         EdgeOne / ESA function build scripts
+wrangler.jsonc   Cloudflare Worker / D1 / KV / Cron configuration
+vercel.json      Vercel build, routing and cron
+edgeone.json     EdgeOne build and static assets
+esa.jsonc        ESA entry and static assets
 ```
 
 </details>
@@ -317,6 +366,9 @@ wrangler.jsonc   Worker / D1 / KV / Cron configuration
 | --- | --- |
 | `npm run dev` | Start the local Workers preview |
 | `npm run build` | Build the Worker and frontend assets |
+| `npm run build:vercel` | Build the Vercel static frontend |
+| `npm run build:edgeone` | Build the EdgeOne frontend and edge function |
+| `npm run build:esa` | Build the ESA frontend and edge function |
 | `npm run preview` | Preview the built `dist`, after running `build` |
 | `npm run deploy` | Build and deploy to Cloudflare |
 | `npm run typecheck` | TypeScript type checking |
@@ -331,13 +383,13 @@ wrangler.jsonc   Worker / D1 / KV / Cron configuration
 <details>
 <summary>Click to expand the notes</summary>
 
-- **Storage limit**: D1 is required in production. KV leases are non-atomic read-modify-write and cannot provide D1-level concurrent settlement or event idempotency. Checkout rejects non-D1 storage and traffic collection stops and reports unavailable.
-- **Platform compatibility**: the project relies on Wrangler, Workers bindings, D1 and Cron. Tencent EdgeOne, Alibaba Cloud ESA, Vercel and similar runtimes have not been verified and cannot be assumed to run this project unchanged.
-- **Panel network**: panels must use an HTTPS hostname. Workers cannot fetch bare IPs, private networks or loopback addresses. If a firewall blocks the panel, allow Cloudflare egress or use a Cloudflare Tunnel.
-- **Execution latency**: Cron runs every minute, handles at most 8 nodes per run with concurrency 4, and rotates through larger fleets. Actual timing also depends on panel availability and D1 event backlog.
-- **Payment boundary**: only Waffo is integrated; sandbox is the default. Real merchant webhooks, the full inquiry payload and Waffo retries have not been validated end-to-end. A payment success redirect is not proof of payment; trust the signed server webhook and order state.
+- **Storage limit**: D1 still provides atomic traffic metering, quota enforcement and Waffo settlement. Blob/KV and MySQL document mode support login, nodes, plans, subscriptions and client sync, but disable checkout, check-in and atomic balance adjustments.
+- **Platform compatibility**: Vercel, EdgeOne and ESA entries and build configs are provided; Vercel requires remote MySQL, while EdgeOne/ESA use Blob/KV. Bind resources, set secrets and complete end-to-end validation before treating any platform as production-ready.
+- **Panel network**: panels must use an HTTPS hostname. Platform runtimes cannot fetch bare IPs, private networks or loopback addresses. If a firewall blocks the panel, allow the platform egress or use a Cloudflare Tunnel.
+- **Execution latency**: Cloudflare/Vercel Cron runs every minute. EdgeOne native schedules have a one-day minimum, and ESA has no native per-minute cron; both need an external `/api/cron` scheduler. A run handles at most 8 nodes with concurrency 4.
+- **Payment boundary**: only Waffo is integrated, and settlement is D1-only; sandbox is the default. Real merchant webhooks, the full inquiry payload and Waffo retries have not been validated end-to-end. A payment success redirect is not proof of payment; trust the signed server webhook and order state.
 - **Login verification**: repository tests do not include real third-party credentials. Configure a valid Site Key, Secret Key, widget hostname and sending domain, and verify real delivery before going live.
-- **Migrations and rollback**: rolling back the Worker does not undo applied D1 migrations. D1 Time Travel restore overwrites the database in place and is destructive; require approval, stop writes, confirm the timestamp and preserve the current state first.
+- **Migrations and rollback**: rolling back the Worker does not undo applied D1 migrations. D1 Time Travel restore overwrites the database in place and is destructive; require approval, stop writes, confirm the timestamp and preserve the current state first. MySQL/Blob/KV document mode creates its own table/keys and has no D1 Time Travel equivalent.
 - **Secrets**: keep `APP_ENCRYPTION_KEY` permanently. Never expose keys, panel passwords, UUIDs, subscription tokens or payment private keys in logs, issues, screenshots or commits.
 
 </details>

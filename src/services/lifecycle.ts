@@ -1,7 +1,7 @@
 import { FREE_PLAN_ID, ensureDefaults, readSetting } from "../domain/defaults";
 import type { Order, User } from "../domain/types";
 import type { RuntimeEnv } from "../env";
-import { D1Store } from "../storage/d1";
+import { getStore } from "../storage";
 import type { DocumentStore, Page } from "../storage/store";
 import { expirePendingOrders } from "./billing";
 import { createUserNotification, deliverPendingNotifications, notificationRecordId, type UserNotification } from "./notifications";
@@ -42,7 +42,7 @@ async function accountCleanupReason(store: DocumentStore, user: User, now: numbe
   return [inactive ? "inactive" : "", withoutPlan ? "without-plan" : ""].filter(Boolean).join("+");
 }
 
-async function processRetention(store: D1Store, env: RuntimeEnv, now: Date, users: User[], orders: Order[]): Promise<number> {
+async function processRetention(store: DocumentStore, env: RuntimeEnv, now: Date, users: User[], orders: Order[]): Promise<number> {
   const [inactiveSetting, withoutPlanSetting, warningSetting, emailEnabled] = await Promise.all([
     readSetting<unknown>(store, "deleteInactiveAfterDays", 0),
     readSetting<unknown>(store, "deleteWithoutPlanAfterDays", 0),
@@ -112,8 +112,7 @@ async function processRetention(store: D1Store, env: RuntimeEnv, now: Date, user
 }
 
 export async function runLifecycleMaintenance(env: RuntimeEnv): Promise<void> {
-  if ((env.STORAGE_DRIVER ?? "d1").toLowerCase() !== "d1" || !env.DB) return;
-  const store = new D1Store(env.DB);
+  const store = getStore(env);
   const owner = crypto.randomUUID();
   if (!(await store.acquireLease("lifecycle-maintenance", owner, Date.now() + 55_000))) return;
   try {

@@ -5,4 +5,9 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), cloudflare({ configPath: "wrangler.jsonc" })],
+  resolve: {
+    alias: {
+      "mysql2/promise": new URL("./src/storage/mysql-stub.ts", import.meta.url).pathname,
+    },
+  },
 });

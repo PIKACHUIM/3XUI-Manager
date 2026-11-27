@@ -75,19 +75,27 @@ D1 の使用量イベントは冪等です。クォータ無効化と決済は�
 
 ## クイックデプロイ
 
-| プラットフォーム | ワンクリックデプロイ | 状態 |
-| --- | :---: | --- |
-| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 検証済み |
-| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口あり、ランタイム適配待ち |
-| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 入口あり、ランタイム適配待ち |
-| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口あり、ランタイム適配待ち |
+| Cloudflare Workers | EdgeOne Makers | Aliyun ESA | Vercel |
+| :---: | :---: | :---: | :---: |
+| [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) |
 
-> ワンクリックデプロイはプラットフォームプロジェクトを作成するだけです。D1、マイグレーション、secrets は自動作成されません。Cloudflare Workers が現在の検証済み本番経路です。EdgeOne、ESA、Vercel は Workers bindings、D1、Cron の適配が別途必要で、そのまま実行できるとは見なせません。
+> ワンクリックデプロイはプラットフォームプロジェクトを作成するだけです。データベース、マイグレーション、secrets は自動作成されません。Cloudflare は D1、EdgeOne/ESA は Blob/KV、Vercel はリモート MySQL を使用します。[手動デプロイ](#手動デプロイ)と[システム構成](#システム構成)を参照してください。
+
+### プラットフォームストレージ
+
+| プラットフォーム | ストレージ | 設定 |
+| --- | --- | --- |
+| Cloudflare Workers | D1（本番）/ KV（制限付き） | `DB` binding；`STORAGE_DRIVER=d1` |
+| EdgeOne Makers | Blob / KV | `STORAGE_DRIVER=blob`；Blob SDK または `EO_KV` / `EO_BLOB` binding |
+| Aliyun ESA | Blob / KV | `STORAGE_DRIVER=blob`；`ESA_BLOB` / `ESA_KV` binding |
+| Vercel / Node | リモート MySQL | `STORAGE_DRIVER=mysql`；`MYSQL_URLS` または `MYSQL_HOST/MYSQL_NAME` |
+
+Blob/KV と MySQL ドキュメントモードはログイン、ノード、プラン、サブスクリプション、クライアント同期に対応します。**原子トラフィック計測、クォータ強制、Waffo 決済は D1 のみ**です。EdgeOne/ESA の Edge ランタイムは MySQL に直接接続できず、Vercel の Node ランタイムはリモート MySQL を利用できます。
 
 ## 手動デプロイ
 
 <details>
-<summary><strong>手動デプロイ手順を展開</strong>（ローカル開発、設定、Cloudflare デプロイ）</summary>
+<summary><strong>手動デプロイ手順を展開</strong>（ローカル開発、設定、マルチプラットフォームデプロイ）</summary>
 
 ### 前提条件
 
@@ -186,6 +194,27 @@ npm run deploy
 5. Waffo の通知 URL を `https://<your-domain>/api/webhooks/waffo` に設定し、サンドボックスでアップグレード / コールバックを検証します。
 6. Cron ログ、トラフィックサンプリング、サブスクリプション出力、パネルクライアント状態を確認します。
 
+### Vercel へのデプロイ
+
+1. Vercel にリポジトリをインポートします。`vercel.json` が `npm run build:vercel`、`dist/vercel`、API rewrite、毎分 `/api/cron` を設定します。
+2. リモート MySQL を用意し、`STORAGE_DRIVER=mysql` と `MYSQL_URLS`（または `MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASS/MYSQL_NAME`）を設定します。
+3. `APP_ENCRYPTION_KEY`、`ADMIN_BOOTSTRAP_TOKEN`、`CRON_SECRET`、任意の `APP_NAME` を設定します。
+4. アプリは `3xui_kv` テーブルを自動作成します。Vercel Hobby では毎分 Cron が使えない場合があるため、`vercel.json` を調整するか外部スケジューラを使用してください。
+
+### EdgeOne へのデプロイ
+
+1. EdgeOne Makers にリポジトリをインポートします。`npm run build:edgeone` が `dist/edgeone` と `edge-functions/api/[[default]].js` を生成します。
+2. Blob または KV をバインドし、`STORAGE_DRIVER=blob` を設定します。Blob は `EO_BLOB_NAMESPACE`、KV は `EO_KV` を使用します。
+3. `APP_ENCRYPTION_KEY`、`ADMIN_BOOTSTRAP_TOKEN`、`CRON_SECRET` を設定します。
+4. EdgeOne の `schedules` は最小間隔が 1 日です。毎分同期が必要な場合は外部スケジューラから `/api/cron` を呼び出してください。
+
+### Aliyun ESA へのデプロイ
+
+1. ESA にリポジトリをインポートします。`esa.jsonc` は `dist/esa-entry.js` と `dist/esa` の静的アセットを使用します。
+2. `ESA_BLOB` または `ESA_KV` をバインドし、`STORAGE_DRIVER=blob` を設定します。
+3. `APP_ENCRYPTION_KEY`、`ADMIN_BOOTSTRAP_TOKEN`、`CRON_SECRET` を設定します。
+4. ESA には毎分 Cron がありません。外部スケジューラから `x-cron-secret` 付きで `/api/cron` を呼び出してください。ESA は CPU/サブリクエスト制限が厳しいため、重い同期処理は外部に任せてください。
+
 </details>
 
 ## システム構成
@@ -194,13 +223,27 @@ npm run deploy
 
 | 名前 | 種類 | 必須 | 説明 |
 | --- | --- | --- | --- |
-| `DB` | D1 | はい | 計測、クォータ、決済、サブスクリプションの中心ストレージ |
+| `DB` | D1 | Cloudflare | 計測、クォータ、決済、サブスクリプションの中心ストレージ |
 | `ASSETS` | Static Assets | はい | React 管理画面とユーザーポータルの静的アセット |
-| `APP_KV` | KV | いいえ | 制限付きデプロイ専用。D1 の原子性の代替にはならない |
-| `STORAGE_DRIVER` | Variable | はい | 本番は `d1` |
+| `APP_KV` | KV | いいえ | Cloudflare KV。制限付きデプロイ専用 |
+| `STORAGE_DRIVER` | Variable | はい | `d1` / `mysql` / `blob` / `kv` |
 | `APP_NAME` | Variable | いいえ | サイトタイトルの既定値。システム設定で上書き可能 |
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 初回セットアップ | 最初の管理者作成にのみ使用 |
 | `APP_ENCRYPTION_KEY` | Secret | はい | パネル認証情報と機密設定を暗号化。32 文字以上 |
+
+### プラットフォーム環境変数
+
+| 変数 | プラットフォーム | 説明 |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | すべて | `d1` / `mysql` / `blob` / `kv` |
+| `MYSQL_URLS` | Vercel / Node | 優先する MySQL 接続文字列 |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASS` / `MYSQL_NAME` | Vercel / Node | MySQL の分割設定 |
+| `CRON_SECRET` | Vercel / EdgeOne / ESA | `/api/cron` を保護。Vercel は Bearer で送信 |
+| `EO_KV` / `EO_BLOB` | EdgeOne | プラットフォーム KV/Blob binding；`STORAGE_DRIVER=blob` |
+| `EO_BLOB_NAMESPACE` | EdgeOne | Blob 名前空間。既定は `default` |
+| `ESA_BLOB` / `ESA_KV` | Aliyun ESA | ESA Blob/KV binding；`STORAGE_DRIVER=blob` |
+
+Vercel/Node は `.env.example`、Cloudflare ローカルは `.dev.vars.example` を参照してください。実際の値をコミットしないでください。
 
 <details>
 <summary><strong>システム設定</strong>（クリックで展開）</summary>
@@ -259,36 +302,35 @@ flowchart LR
     V["v2ray / SIP008"]
   end
 
-  subgraph Edge["Cloudflare"]
-    W["Worker + Hono API"]
-    A["React SPA / Static Assets"]
-    D[("D1")]
-    K[("KV（制限付き）")]
-    T["Cron 毎分"]
+  subgraph Platforms["Edge / Serverless"]
+    E["Worker / Vercel / EdgeOne / ESA エントリ"]
+    A["Hono API + React 静的アセット"]
   end
 
+  S[("D1 / MySQL / Blob / KV")]
+  T["プラットフォーム Cron / 外部スケジューラ"]
   X["3X-UI パネル"]
   P["Waffo"]
   M["Resend / Turnstile"]
 
-  B --> W
-  C --> W
-  V --> W
-  W --> A
-  W --> D
-  W --> K
-  T --> W
-  W --> X
-  W --> P
-  W --> M
+  B --> E
+  C --> E
+  V --> E
+  E --> A
+  E --> S
+  T --> E
+  E --> X
+  E --> P
+  E --> M
 ```
 
 | レイヤー | 技術 |
 | --- | --- |
-| ランタイム | Cloudflare Workers、Wrangler |
-| バックエンド | Hono、TypeScript、D1、KV（制限付き） |
+| ランタイム | Cloudflare Workers、Vercel Node、EdgeOne Edge Functions、ESA Edge Functions |
+| バックエンド | Hono、TypeScript |
+| ストレージ | D1（原子性）、リモート MySQL、EdgeOne/ESA Blob または KV |
 | フロントエンド | React 19、Vite、Tailwind CSS 4、Recharts、Lucide |
-| テスト | Vitest、Wrangler ローカル D1 platform |
+| テスト | Vitest、Wrangler ローカル D1 platform、ストレージアダプタテスト |
 | 外部システム | 3X-UI HTTP API、Waffo、Turnstile、Resend |
 
 <details>
@@ -296,16 +338,23 @@ flowchart LR
 
 ```text
 src/
-├─ api/          Hono ルート：auth / user / admin / payments / subscriptions
+├─ app.ts        Hono アプリと /api/cron
+├─ api/          ルート：auth / user / admin / payments / subscriptions
 ├─ services/     課金、トラフィック、ライフサイクル、通知、サブスクリプション、ノード同期、WireGuard
 ├─ adapters/     外部システム：3X-UI、Waffo
 ├─ domain/       型、既定値、暗号化、WireGuard
-├─ storage/      D1 / KV ドキュメントストレージ
-├─ worker/       Worker エントリと Cron スケジュール
+├─ storage/      D1 / MySQL / Blob / KV アダプタ
+├─ platform/     Vercel / EdgeOne / ESA エントリと環境マッピング
+├─ worker/       Cloudflare エントリと共有 Cron
 └─ client/       React 管理画面とユーザーポータル
+api/             Vercel Web Handler と Cron
 migrations/      D1 SQL マイグレーション
 public/          アイコンなどの静的アセット
-wrangler.jsonc   Worker / D1 / KV / Cron 設定
+scripts/         EdgeOne / ESA ビルドスクリプト
+wrangler.jsonc   Cloudflare Worker / D1 / KV / Cron
+vercel.json      Vercel ビルド、ルーティング、Cron
+edgeone.json     EdgeOne ビルドと静的アセット
+esa.jsonc        ESA エントリと静的アセット
 ```
 
 </details>
@@ -317,6 +366,9 @@ wrangler.jsonc   Worker / D1 / KV / Cron 設定
 | --- | --- |
 | `npm run dev` | ローカル Workers プレビューを起動 |
 | `npm run build` | Worker とフロントエンドをビルド |
+| `npm run build:vercel` | Vercel 用静的フロントエンドをビルド |
+| `npm run build:edgeone` | EdgeOne 用フロントエンドと Edge Function をビルド |
+| `npm run build:esa` | ESA 用フロントエンドと Edge Function をビルド |
 | `npm run preview` | ビルド済み `dist` をプレビュー。先に `build` が必要 |
 | `npm run deploy` | ビルドして Cloudflare へデプロイ |
 | `npm run typecheck` | TypeScript 型チェック |
@@ -331,13 +383,13 @@ wrangler.jsonc   Worker / D1 / KV / Cron 設定
 <details>
 <summary>クリックして注意事項を展開</summary>
 
-- **ストレージ制限**：本番では D1 が必須です。KV の lease は非アトミックな read-modify-write で、D1 レベルの同時決済やイベント冪等性を提供できません。チェックアウトは非 D1 ストレージを拒否し、トラフィック収集は停止して利用不可を報告します。
-- **プラットフォーム互換性**：Wrangler、Workers bindings、D1、Cron に依存しています。Tencent EdgeOne、Alibaba Cloud ESA、Vercel などのランタイムは未検証で、そのまま動作するとは見なせません。
-- **パネルのネットワーク**：パネルは HTTPS ホスト名必須です。Worker は裸 IP、プライベートネットワーク、ループバックへアクセスできません。ファイアウォールで遮断される場合は Cloudflare の出口を許可するか、Cloudflare Tunnel を使用してください。
-- **実行遅延**：Cron は毎分実行され、1 回最大 8 ノード、同時実行 4 です。ノードが多い場合はローテーションし、実際の時刻はパネルの可用性と D1 イベントの滞留にも左右されます。
-- **決済の境界**：Waffo のみ対応し、既定はサンドボックスです。実際のマーチャント Webhook、完全な Inquiry payload、Waffo の再試行はエンドツーエンド未検証です。決済成功リダイレクトを支払いの証拠にせず、署名検証済みのサーバー Webhook と注文状態を信頼してください。
+- **ストレージ制限**：D1 は原子トラフィック計測、クォータ強制、Waffo 決済を提供します。Blob/KV と MySQL ドキュメントモードはログイン、ノード、プラン、サブスクリプション、クライアント同期に対応しますが、checkout、チェックイン、原子的な残高調整は無効です。
+- **プラットフォーム互換性**：Vercel、EdgeOne、ESA の入口とビルド設定を提供しています。Vercel はリモート MySQL、EdgeOne/ESA は Blob/KV が必要です。実環境でバインディング、secrets、エンドツーエンド検証を完了してください。
+- **パネルのネットワーク**：パネルは HTTPS ホスト名必須です。各ランタイムは裸 IP、プライベートネットワーク、ループバックへアクセスできません。遮断される場合はプラットフォームの出口を許可するか、Cloudflare Tunnel を使用してください。
+- **実行遅延**：Cloudflare/Vercel の Cron は毎分実行されます。EdgeOne の schedules は最小 1 日、ESA には毎分 Cron がないため、外部から `/api/cron` を呼び出してください。1 回最大 8 ノード、同時実行 4 です。
+- **決済の境界**：Waffo のみ対応し、決済は D1 のみです。既定はサンドボックスで、実際のマーチャント Webhook、Inquiry payload、Waffo の再試行はエンドツーエンド未検証です。決済成功リダイレクトを支払いの証拠にせず、署名検証済みのサーバー Webhook と注文状態を信頼してください。
 - **ログイン検証**：リポジトリのテストに実際の第三者認証情報は含まれません。有効な Site Key、Secret Key、widget ホスト名、送信ドメインを設定し、本番前に実配信を検証してください。
-- **マイグレーションとロールバック**：Worker をロールバックしても適用済み D1 migration は戻りません。D1 Time Travel の復元はデータベースを上書きする破壊的操作です。承認、書き込み停止、時刻確認、現状保存を先に行ってください。
+- **マイグレーションとロールバック**：Worker のロールバックでは適用済み D1 migration は戻りません。D1 Time Travel の復元は破壊的です。MySQL/Blob/KV は独自のテーブル/キーを作成し、D1 Time Travel 相当の復元はありません。
 - **シークレット管理**：`APP_ENCRYPTION_KEY` は永久に保存してください。キー、パネルパスワード、UUID、サブスクリプショントークン、決済秘密鍵をログ、Issue、スクリーンショット、コミットに露出させないでください。
 
 </details>

@@ -1,0 +1,7 @@
+# Cloudflare Workers local development (copy to .dev.vars; never commit real values)
+ADMIN_BOOTSTRAP_TOKEN=
+APP_ENCRYPTION_KEY=
+# Optional: only needed when calling /api/cron manually or from an external scheduler.
+CRON_SECRET=
+STORAGE_DRIVER=d1
+APP_NAME=3XUI Manager

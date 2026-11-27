@@ -1,0 +1,9 @@
+{
+  "name": "3xui-manager",
+  "entry": "./dist/esa-entry.js",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build:esa",
+  "assets": {
+    "directory": "./dist/esa"
+  }
+}

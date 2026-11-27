@@ -1,7 +1,7 @@
 import type { RuntimeEnv } from "../env";
 import { servesPlan } from "../domain/defaults";
 import type { ClientMapping, Inbound, InboundNodeBinding, User } from "../domain/types";
-import { D1Store } from "../storage/d1";
+import { getStore } from "../storage";
 import type { DocumentStore, Page } from "../storage/store";
 import { syncUserEntitlements } from "./xui-sync";
 
@@ -38,8 +38,7 @@ type DueUser = { user: User; priority: number; updatedAt: number };
  */
 export async function runEntitlementReconciliation(env: RuntimeEnv): Promise<ReconcileResult> {
   const empty: ReconcileResult = { scanned: 0, due: 0, synced: 0, failed: 0 };
-  if ((env.STORAGE_DRIVER ?? "d1").toLowerCase() !== "d1" || !env.DB) return empty;
-  const store = new D1Store(env.DB);
+  const store = getStore(env);
   const owner = crypto.randomUUID();
   if (!(await store.acquireLease(LEASE, owner, Date.now() + LEASE_MS))) return empty;
   try {
