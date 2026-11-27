@@ -17,13 +17,6 @@
   </p>
 
   <p>
-    <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager">
-      <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
-    </a>
-  </p>
-  <p><sub>원클릭 배포는 Worker만 생성합니다. D1, 데이터베이스 마이그레이션, Worker secrets는 아래에서 직접 설정해야 합니다.</sub></p>
-
-  <p>
     <a href="../README.md">简体中文</a> ·
     <a href="./README_zh-TW.md">繁體中文</a> ·
     <a href="./README_en.md">English</a> ·
@@ -32,8 +25,8 @@
   </p>
 
   <p>
-    <a href="#빠른-시작">빠른 시작</a> ·
-    <a href="#cloudflare-배포">배포</a> ·
+    <a href="#빠른-배포">빠른 배포</a> ·
+    <a href="#수동-배포">수동 배포</a> ·
     <a href="#시스템-구성">설정</a> ·
     <a href="#아키텍처">아키텍처</a> ·
     <a href="#주의-사항">주의 사항</a>
@@ -61,20 +54,40 @@
 | **관리 경험** | 12개 UI 언어, 아랍어 RTL, 라이트 / 다크 / 시스템 테마, 테마 프리셋, 반응형 레이아웃, 검색과 페이지네이션 |
 | **보안** | 세션 Cookie, 동일 오리진 검사, 민감 필드 암호화, 가입 / 출석 체크 Turnstile, `/api/health` 기능 확인 |
 
-### 구독 생성 방식
+<details>
+<summary><strong>구독 생성 방식</strong> (클릭하여 펼치기)</summary>
 
 - **Clash / Mihomo**: `选择节点` 수동 그룹과 규칙 카테고리 그룹을 생성하며 `url-test` 자동 전환은 만들지 않습니다. 각 카테고리에서 특정 노드를 직접 선택할 수 있습니다.
 - **정렬**: 중국 본토 노드가 먼저 오고, 같은 그룹에서는 플랫폼에 저장된 순서의 오름차순입니다. 관리 목록, 사용자 노드 목록, 세 가지 구독 형식이 같은 정렬 데이터를 사용합니다.
 - **자격 증명**: 노드에 성공적으로 동기화된 클라이언트만 출력합니다. 부분적으로 성공한 인바운드는 확인된 노드만 노출합니다.
 - **캐시**: ETag를 반환하고 재검증 시 304를 반환하여 변경되지 않은 프로필의 재전송을 줄입니다.
 
-### 계측과 할당량
+</details>
+
+<details>
+<summary><strong>계측과 할당량</strong> (클릭하여 펼치기)</summary>
 
 Cron은 매분 트래픽 샘플링과 권한 대사를 실행합니다. 한 번에 최대 8개 노드, 동시성 4이며, 노드가 많으면 순환 처리합니다. 패널에 연결할 수 없거나 동기화에 실패한 노드는 정상으로 처리하지 않고 이후 실행에서 해당 클라이언트를 재시도합니다.
 
 D1의 사용량 이벤트는 멱등입니다. 할당량 비활성화와 결제 정산은 리스로 직렬화되어 같은 계정의 동시 쓰기가 서로를 덮어쓰지 않습니다.
 
-## 빠른 시작
+</details>
+
+## 빠른 배포
+
+| 플랫폼 | 원클릭 배포 | 상태 |
+| --- | :---: | --- |
+| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 검증됨 |
+| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 진입점 제공, 런타임 적응 필요 |
+| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 진입점 제공, 런타임 적응 필요 |
+| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 진입점 제공, 런타임 적응 필요 |
+
+> 원클릭 배포는 플랫폼 프로젝트만 생성합니다. D1, 마이그레이션, secrets는 자동으로 만들지 않습니다. Cloudflare Workers가 현재 검증된 운영 경로이며, EdgeOne, ESA, Vercel은 Workers bindings, D1, Cron 적응이 별도로 필요하므로 그대로 실행된다고 볼 수 없습니다.
+
+## 수동 배포
+
+<details>
+<summary><strong>수동 배포 단계 펼치기</strong> (로컬 개발, 설정, Cloudflare 배포)</summary>
 
 ### 사전 요구 사항
 
@@ -109,7 +122,8 @@ APP_ENCRYPTION_KEY="<32자 이상, 영구 보관 필요>"
 
 </details>
 
-### 초기 설정
+<details>
+<summary><strong>초기 설정</strong> (클릭하여 펼치기)</summary>
 
 1. 로컬 개발 URL을 열고 로그인 화면의 "최초 관리자 설정"을 사용합니다.
 2. `ADMIN_BOOTSTRAP_TOKEN`을 입력해 관리자를 생성합니다. 생성 후 이 Token은 로그인 자격 증명으로 사용할 수 없습니다.
@@ -118,7 +132,9 @@ APP_ENCRYPTION_KEY="<32자 이상, 영구 보관 필요>"
 5. 필요에 따라 Turnstile, Resend, Waffo, 출석 체크 보상을 설정합니다.
 6. 사용자를 만들거나 가입하게 한 뒤 구독 링크와 클라이언트 동기화를 확인합니다.
 
-## Cloudflare 배포
+</details>
+
+### Cloudflare 배포
 
 ### 1. D1 데이터베이스 생성
 
@@ -170,6 +186,8 @@ npm run deploy
 5. Waffo 알림 URL을 `https://<your-domain>/api/webhooks/waffo`로 설정하고 샌드박스에서 업그레이드 / 콜백을 검증합니다.
 6. Cron 로그, 트래픽 샘플링, 구독 출력, 패널 클라이언트 상태를 확인합니다.
 
+</details>
+
 ## 시스템 구성
 
 ### Worker 바인딩 및 변수
@@ -184,7 +202,8 @@ npm run deploy
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 최초 설정 | 첫 관리자 생성에만 사용 |
 | `APP_ENCRYPTION_KEY` | Secret | 예 | 패널 자격 증명과 민감 설정 암호화. 32자 이상 |
 
-### 시스템 설정
+<details>
+<summary><strong>시스템 설정</strong> (클릭하여 펼치기)</summary>
 
 | 설정 | 용도 |
 | --- | --- |
@@ -199,6 +218,8 @@ npm run deploy
 | 계정 정리 관련 항목 | 비활성/요금제 없음 정리 기준과 경고 일수. 기본 비활성 |
 
 민감 필드는 `APP_ENCRYPTION_KEY`로 암호화해 저장합니다. 관리자가 설정을 읽으면 secret 필드는 빈 문자열로 반환되고 `secretConfigured`가 설정 여부를 나타냅니다. 쓸 때 생략하거나 빈 문자열을 보내면 기존 값을 유지하고, `null`은 삭제, 비어 있지 않은 문자열은 교체합니다.
+
+</details>
 
 ### Waffo 결제
 
@@ -307,14 +328,19 @@ wrangler.jsonc   Worker / D1 / KV / Cron 설정
 
 ## 주의 사항
 
+<details>
+<summary>클릭하여 주의 사항 펼치기</summary>
+
 - **저장소 제한**: 운영 환경에는 D1이 필수입니다. KV의 lease는 비원자적 read-modify-write이며 D1 수준의 동시 정산과 이벤트 멱등성을 제공할 수 없습니다. 현재 checkout은 비 D1 저장소를 거부하고 트래픽 수집은 중단되어 사용할 수 없음을 보고합니다.
-- **플랫폼 호환성**: Wrangler, Workers bindings, D1, Cron에 의존합니다. Tencent EdgeOne, Alibaba Cloud ESA 같은 런타임은 검증되지 않았으며 그대로 실행된다고 볼 수 없습니다.
+- **플랫폼 호환성**: Wrangler, Workers bindings, D1, Cron에 의존합니다. Tencent EdgeOne, Alibaba Cloud ESA, Vercel 같은 런타임은 검증되지 않았으며 그대로 실행된다고 볼 수 없습니다.
 - **패널 네트워크**: 패널은 HTTPS 호스트명을 사용해야 합니다. Worker는 원시 IP, 사설 네트워크, 루프백 주소에 접근할 수 없습니다. 방화벽이 막으면 Cloudflare egress를 허용하거나 Cloudflare Tunnel을 사용하세요.
 - **실행 지연**: Cron은 매분 실행되며 한 번에 최대 8개 노드, 동시성 4입니다. 노드가 많으면 순환 처리하며 실제 시점은 패널 가용성과 D1 이벤트 적체에도 영향을 받습니다.
 - **결제 경계**: Waffo만 연동하며 기본은 샌드박스입니다. 실제 가맹점 Webhook, 전체 Inquiry payload, Waffo 재시도는 종단 간 검증되지 않았습니다. 결제 성공 리디렉션을 결제 증거로 보지 말고 서명 검증된 서버 Webhook과 주문 상태를 신뢰하세요.
 - **로그인 검증**: 저장소 테스트에는 실제 제3자 자격 증명이 없습니다. 유효한 Site Key, Secret Key, widget 호스트명, 발신 도메인을 설정하고 운영 전에 실제 발송을 검증하세요.
 - **마이그레이션과 롤백**: Worker를 롤백해도 적용된 D1 migration은 되돌아가지 않습니다. D1 Time Travel 복원은 데이터베이스를 덮어쓰는 파괴적 작업입니다. 승인, 쓰기 중지, 시점 확인, 현재 상태 보존을 먼저 해야 합니다.
 - **Secret 관리**: `APP_ENCRYPTION_KEY`는 영구 보관하세요. 키, 패널 비밀번호, UUID, 구독 토큰, 결제 개인 키를 로그, Issue, 스크린샷, 커밋에 노출하지 마세요.
+
+</details>
 
 <details>
 <summary><strong>FAQ</strong> (클릭하여 펼치기)</summary>

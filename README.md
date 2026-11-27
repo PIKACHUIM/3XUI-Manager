@@ -5,8 +5,6 @@
 
   <p><em>在 Cloudflare Workers 上管理 3X-UI 节点、套餐、订阅与账单</em></p>
 
-  <p>一个同源的全栈管理平台：Hono API + React 管理端 + D1 计量与结算。</p>
-
   <p>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-3DA639" alt="License" /></a>
     <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white" alt="Cloudflare Workers" />
@@ -17,13 +15,6 @@
   </p>
 
   <p>
-    <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager">
-      <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
-    </a>
-  </p>
-  <p><sub>一键部署只创建 Worker；D1、数据库迁移和 Worker secrets 仍需按下方说明手动完成。</sub></p>
-
-  <p>
     <a href="./README.md">简体中文</a> ·
     <a href="./readmes/README_zh-TW.md">繁體中文</a> ·
     <a href="./readmes/README_en.md">English</a> ·
@@ -32,8 +23,8 @@
   </p>
 
   <p>
-    <a href="#快速开始">快速开始</a> ·
-    <a href="#部署到-cloudflare">部署</a> ·
+    <a href="#快速部署">快速部署</a> ·
+    <a href="#手动部署">手动部署</a> ·
     <a href="#系统配置">配置</a> ·
     <a href="#设计架构">架构</a> ·
     <a href="#注意事项">注意事项</a>
@@ -42,39 +33,62 @@
 
 ## 项目简介
 
-3XUI Manager 把 3X-UI 的日常运营集中到一个 Cloudflare Worker 中：节点探测、入站与客户端同步、套餐与用户、订单与余额、流量计量、配额强制，以及 Clash / V2Ray / SIP008 订阅输出。
+3XUI Manager 把 3X-UI 的日常运营集中到一个 Cloudflare Worker内，支持：
 
-它**不是** 3X-UI 面板的替代品，而是通过 3X-UI HTTP API 管理面板的上层平台。管理端和用户端同源部署，避免把前端、API 和 Webhook 拆到不同域名。
+- 节点探测、入站与客户端同步
+- 套餐与用户、订单与余额
+- 流量计量、配额管理和限制
+- Clash / V2Ray / SIP008 订阅
 
-适合自托管、单管理员或小团队运营多台 3X-UI 节点的场景。
+3XUI Manager 适合自托管、单管理员或小团队运营多台 3X-UI 节点的场景。
 
 ## 功能一览
 
 | 模块 | 能力 |
 | --- | --- |
-| **节点入站** | 多节点注册、连通性探测；从 3X-UI 同步入站；按 3X-UI 结构分节的入站编辑器；未托管的 JSON 键保存时原样保留 |
-| **订阅输出** | Clash / Mihomo YAML、V2Ray Base64、Shadowsocks SIP008；`选择节点` 手动 `select` 分组；大陆节点优先排序；ETag / 304 |
-| **用户套餐** | 注册、登录、邮箱验证；免费套餐；套餐绑定入站；升级时余额优先抵扣；管理员可创建用户并直接分配套餐 |
-| **计量配额** | 每分钟采样节点流量；支持倍率、流量重置；D1 幂等事件；耗尽后禁用客户端，失败在后续 Cron 重试 |
-| **订单支付** | Waffo 下单、签名验证、Webhook、订单查询；D1 结算锁；人工充值 / 退款生成 `manual` 订单与余额流水 |
-| **运维工具** | 站内通知、可选邮件重试、推荐奖励、账户保留清理、Cron 生命周期维护、健康检查 |
-| **管理体验** | 12 种界面语言、阿拉伯语 RTL、亮色 / 暗色 / 跟随系统、主题预设、响应式布局、搜索与分页 |
-| **安全防护** | 会话 Cookie、同源校验、敏感字段加密、Turnstile 注册 / 签到校验、`/api/health` 能力检查 |
+| **节点** | 多节点注册、连通性探测；从 3X-UI 同步入站；按 3X-UI 结构分节的入站编辑器；未托管的 JSON 键保存时原样保留 |
+| **订阅** | Clash / Mihomo YAML、V2Ray Base64、Shadowsocks SIP008；`选择节点` 手动 `select` 分组；大陆节点优先排序；ETag / 304 |
+| **套餐** | 注册、登录、邮箱验证；免费套餐；套餐绑定入站；升级时余额优先抵扣；管理员可创建用户并直接分配套餐 |
+| **配额** | 每分钟采样节点流量；支持倍率、流量重置；D1 幂等事件；耗尽后禁用客户端，失败在后续 Cron 重试 |
+| **支付** | Waffo 下单、签名验证、Webhook、订单查询；D1 结算锁；人工充值 / 退款生成 `manual` 订单与余额流水 |
+| **运维** | 站内通知、可选邮件重试、推荐奖励、账户保留清理、Cron 生命周期维护、健康检查 |
+| **管理** | 12 种界面语言、阿拉伯语 RTL、亮色 / 暗色 / 跟随系统、主题预设、响应式布局、搜索与分页 |
+| **安全** | 会话 Cookie、同源校验、敏感字段加密、Turnstile 注册 / 签到校验、`/api/health` 能力检查 |
 
-### 订阅是怎么生成的
+<details>
+<summary><strong>订阅生成</strong>（点击展开）</summary>
 
-- **Clash / Mihomo**：生成 `选择节点` 手动分组和规则分类分组，不生成 `url-test` 自动切换；每个分类仍可直接选具体节点。
+- **Clash**：生成 `选择节点` 手动分组和规则分类分组，不生成 `url-test` 自动切换；每个分类仍可直接选具体节点。
 - **排序**：大陆节点优先，同类按平台保存的顺序升序；管理列表、用户节点列表和三种订阅格式使用同一套排序数据。
 - **凭据**：订阅只使用成功同步到节点的客户端映射；部分成功的入站只输出已确认的节点。
 - **缓存**：响应带 ETag，客户端重新校验时返回 304，减少重复传输。
 
-### 计量与配额
+</details>
+
+<details>
+<summary><strong>计量配额</strong>（点击展开）</summary>
 
 Cron 每分钟运行一次流量采样和权限对账。单轮最多处理 8 个节点，并发上限 4；节点更多时轮转采样。面板不可达或同步失败不会把节点误判为正常，相关客户端会在后续轮次重试。
 
 D1 中的用量事件是幂等的，配额禁用和支付结算都通过 lease 串行化，避免同一账户的并发写入互相覆盖。
 
-## 快速开始
+</details>
+
+## 快速部署
+
+| 平台 | 一键部署 | 状态 |
+| --- | :---: | --- |
+| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 已验证 |
+| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口已提供，运行时待适配 |
+| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 入口已提供，运行时待适配 |
+| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口已提供，运行时待适配 |
+
+> 一键部署只创建平台项目，不会自动创建 D1、执行迁移或填写 secrets。Cloudflare Workers 是当前已验证的生产路径；EdgeOne、ESA、Vercel 需要自行适配 Workers bindings、D1 和 Cron，不能视为可直接运行。
+
+## 手动部署
+
+<details>
+<summary><strong>展开手动部署步骤</strong>（本地开发、配置与 Cloudflare 部署）</summary>
 
 ### 前置要求
 
@@ -109,7 +123,8 @@ APP_ENCRYPTION_KEY="<至少 32 个字符，需长期保存>"
 
 </details>
 
-### 配置系统
+<details>
+<summary><strong>配置系统</strong>（点击展开）</summary>
 
 1. 打开本地开发地址，使用登录页的“首次管理员初始化”。
 2. 输入 `ADMIN_BOOTSTRAP_TOKEN`，创建管理员账号；建成后该 Token 不再代替管理员登录凭据。
@@ -118,7 +133,9 @@ APP_ENCRYPTION_KEY="<至少 32 个字符，需长期保存>"
 5. 按需配置 Turnstile、Resend、Waffo 和签到奖励。
 6. 创建用户或让用户注册，检查订阅链接与客户端同步状态。
 
-## 部署到 Cloudflare
+</details>
+
+### 部署到 Cloudflare
 
 ### 1. 创建 D1 数据库
 
@@ -139,7 +156,7 @@ npx wrangler secret put APP_ENCRYPTION_KEY
 
 这两项只在部署环境设置。Waffo 的 API Key、商户号、签名私钥和平台公钥现在通过管理员“系统设置”保存，不再读取同名 Worker 环境变量。
 
-### 3. 应用数据库迁移
+### 3. 数据迁移
 
 迁移不会自动执行。先审阅 `migrations/` 中待应用的 SQL，导出备份，再由有生产权限的操作者应用：
 
@@ -151,7 +168,7 @@ npm run db:remote
 
 `--remote` 会写入远程数据库。执行前请核对 Wrangler 登录账号、数据库名/ID、备份可用性和恢复责任人。
 
-### 4. 构建并发布
+### 4. 构建发布
 
 ```bash
 npm run typecheck
@@ -161,7 +178,7 @@ npm run deploy
 
 `npm run deploy` 等价于 `npm run build && wrangler deploy`，会先构建前端静态资源，再发布 Worker、D1 绑定和 Cron 触发器。
 
-### 5. 发布后检查
+### 5. 完成检查
 
 1. 访问 `https://<你的域名>/api/health`，确认 D1 计量、配额强制和支付结算能力正常。
 2. 完成首次管理员初始化并登录，确认会话 Cookie 与同源请求正常。
@@ -169,6 +186,8 @@ npm run deploy
 4. 在系统设置填写 `publicAppUrl`，必须是最终 HTTPS 源站，不带路径、凭据、查询或片段。
 5. 在 Waffo 商户后台把通知地址设为 `https://<你的域名>/api/webhooks/waffo`，并用沙箱完成一次升级/回调验证。
 6. 检查 Cron 执行日志、流量采样、订阅输出和节点客户端状态。
+
+</details>
 
 ## 系统配置
 
@@ -184,7 +203,8 @@ npm run deploy
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 首次初始化 | 只用于创建第一个管理员 |
 | `APP_ENCRYPTION_KEY` | Secret | 是 | 加密面板凭据和系统设置敏感字段，至少 32 字符 |
 
-### 系统设置
+<details>
+<summary><strong>系统设置</strong>（点击展开）</summary>
 
 | 设置 | 用途 |
 | --- | --- |
@@ -199,6 +219,8 @@ npm run deploy
 | 账户清理相关项 | 不活跃/无套餐清理阈值与预警天数；默认关闭 |
 
 敏感字段使用 `APP_ENCRYPTION_KEY` 加密后保存。管理员读取设置时，秘密字段返回空字符串，并通过 `secretConfigured` 表示是否已配置；写入时省略或传空字符串保留旧值，传 `null` 清除，传非空字符串替换。
+
+</details>
 
 ### Waffo 支付
 
@@ -307,14 +329,19 @@ wrangler.jsonc   Worker / D1 / KV / Cron 配置
 
 ## 注意事项
 
+<details>
+<summary>点击展开查看注意事项</summary>
+
 - **存储限制**：D1 是生产必需项,KV 的 lease 是非原子读后写，不能提供 D1 级并发结算和事件幂等保证。当前支付 checkout 会拒绝非 D1 存储，流量采集会停止并报告不可用。
-- **平台兼容**：项目基于 Wrangler、Workers bindings、D1 和 Cron 构建；Tencent EdgeOne、Alibaba Cloud ESA 等运行时尚未逐项验证，不能视为可原样移植。
+- **平台兼容**：项目基于 Wrangler、Workers bindings、D1 和 Cron 构建；Tencent EdgeOne、Alibaba Cloud ESA、Vercel 等运行时尚未逐项验证，不能视为可原样移植。
 - **面板网络**：面板必须使用 HTTPS 域名。Worker 无法访问裸 IP、私网或回环地址；面板被防火墙拦截时，应放行 Cloudflare 出口或使用 Cloudflare Tunnel。
 - **执行延迟**：Cron 每分钟运行，单轮最多 8 个节点、并发 4；节点更多时轮转采样，实际执行时间还受面板可用性和 D1 事件积压影响。
 - **支付边界**：只接入 Waffo；沙箱为默认环境；真实商户 Webhook、完整 Inquiry payload 和 Waffo 重试行为未在商户环境端到端验证。支付成功跳转不能当作付款凭证，以签名验证后的服务端 Webhook 和订单状态为准。
 - **登录验证**：仓库测试不包含真实第三方凭据；上线前必须配置有效 Site Key、Secret Key、widget 域名和发件域，并自行完成真实投递验证。
 - **迁移回滚**：回滚 Worker 不会撤销已应用的 D1 migration。D1 Time Travel 恢复会原地覆盖数据库，属于破坏性操作，必须审批、停止写入、确认时间点并先保留当前状态。
 - **密钥管理**：`APP_ENCRYPTION_KEY` 必须长期保存；不要在日志、Issue、截图或提交记录中暴露密钥、面板密码、UUID、订阅令牌或支付私钥。
+
+</details>
 
 <details>
 <summary><strong>常见问题</strong>（点击展开）</summary>

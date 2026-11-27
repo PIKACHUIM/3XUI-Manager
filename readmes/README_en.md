@@ -17,13 +17,6 @@
   </p>
 
   <p>
-    <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager">
-      <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
-    </a>
-  </p>
-  <p><sub>The one-click deploy only creates the Worker. D1, database migrations and Worker secrets still need to be configured below.</sub></p>
-
-  <p>
     <a href="../README.md">简体中文</a> ·
     <a href="./README_zh-TW.md">繁體中文</a> ·
     <strong>English</strong> ·
@@ -32,8 +25,8 @@
   </p>
 
   <p>
-    <a href="#quick-start">Quick start</a> ·
-    <a href="#deploy-to-cloudflare">Deploy</a> ·
+    <a href="#quick-deploy">Quick deploy</a> ·
+    <a href="#manual-deployment">Manual deployment</a> ·
     <a href="#configuration">Configuration</a> ·
     <a href="#architecture">Architecture</a> ·
     <a href="#notes">Notes</a>
@@ -61,20 +54,40 @@ It is intended for self-hosting, a single administrator, or a small team operati
 | **Experience** | 12 UI languages, Arabic RTL, light / dark / system themes, theme presets, responsive layout, search and pagination |
 | **Security** | Session cookies, same-origin checks, encrypted sensitive fields, Turnstile for registration / check-in, `/api/health` capability checks |
 
-### How subscriptions are generated
+<details>
+<summary><strong>How subscriptions are generated</strong> (click to expand)</summary>
 
 - **Clash / Mihomo**: generates the `选择节点` manual group and rule-category groups, without `url-test` auto-switching. Every category can still select a specific node.
 - **Ordering**: mainland nodes come first, then the saved platform order within each group. Admin lists, user node lists and all subscription formats share the same ordering data.
 - **Credentials**: only clients that were successfully synchronized to a node are emitted. A partially synchronized inbound only exposes confirmed nodes.
 - **Caching**: responses carry an ETag and return 304 on revalidation to avoid retransmitting an unchanged profile.
 
-### Metering and quota
+</details>
+
+<details>
+<summary><strong>Metering and quota</strong> (click to expand)</summary>
 
 Cron runs traffic sampling and entitlement reconciliation every minute. One run handles at most 8 nodes with concurrency 4; larger fleets rotate through batches. An unreachable panel or failed synchronization is never treated as healthy, and affected clients are retried on later runs.
 
 Usage events in D1 are idempotent. Quota disabling and payment settlement are serialized with leases so concurrent writes for the same account cannot overwrite each other.
 
-## Quick start
+</details>
+
+## Quick deploy
+
+| Platform | One-click deploy | Status |
+| --- | :---: | --- |
+| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | Verified |
+| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | Entry provided; runtime adaptation pending |
+| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | Entry provided; runtime adaptation pending |
+| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | Entry provided; runtime adaptation pending |
+
+> One-click deploy only creates the platform project. It does not create D1, run migrations or fill secrets. Cloudflare Workers is the verified production path; EdgeOne, ESA and Vercel require adapting Workers bindings, D1 and Cron and cannot be treated as runnable as-is.
+
+## Manual deployment
+
+<details>
+<summary><strong>Expand manual deployment steps</strong> (local development, configuration and Cloudflare deploy)</summary>
 
 ### Requirements
 
@@ -109,7 +122,8 @@ Business settings (Turnstile, email, payments, check-in and referral rules) are 
 
 </details>
 
-### Configure the system
+<details>
+<summary><strong>Configure the system</strong> (click to expand)</summary>
 
 1. Open the local development URL and use **First-time admin setup** on the login page.
 2. Enter `ADMIN_BOOTSTRAP_TOKEN` to create the administrator. After that, the token is no longer a login credential.
@@ -118,7 +132,9 @@ Business settings (Turnstile, email, payments, check-in and referral rules) are 
 5. Configure Turnstile, Resend, Waffo and check-in rewards as needed.
 6. Create a user or let one register, then verify subscription links and client synchronization.
 
-## Deploy to Cloudflare
+</details>
+
+### Deploy to Cloudflare
 
 ### 1. Create the D1 database
 
@@ -170,6 +186,8 @@ npm run deploy
 5. Set the Waffo notification URL to `https://<your-domain>/api/webhooks/waffo` and complete a sandbox upgrade/callback test.
 6. Check Cron logs, traffic sampling, subscription output and panel client state.
 
+</details>
+
 ## Configuration
 
 ### Worker bindings and variables
@@ -184,7 +202,8 @@ npm run deploy
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | First setup | Used only to create the first administrator |
 | `APP_ENCRYPTION_KEY` | Secret | Yes | Encrypts panel credentials and sensitive settings; at least 32 characters |
 
-### System settings
+<details>
+<summary><strong>System settings</strong> (click to expand)</summary>
 
 | Setting | Purpose |
 | --- | --- |
@@ -199,6 +218,8 @@ npm run deploy
 | Account cleanup settings | Inactive/no-plan thresholds and warning days; disabled by default |
 
 Sensitive fields are encrypted with `APP_ENCRYPTION_KEY`. When an administrator reads settings, secret fields are returned as empty strings and `secretConfigured` reports whether they are set. On write, an omitted field or empty string keeps the old value, `null` clears it, and a non-empty string replaces it.
+
+</details>
 
 ### Waffo payments
 
@@ -307,14 +328,19 @@ wrangler.jsonc   Worker / D1 / KV / Cron configuration
 
 ## Notes
 
+<details>
+<summary>Click to expand the notes</summary>
+
 - **Storage limit**: D1 is required in production. KV leases are non-atomic read-modify-write and cannot provide D1-level concurrent settlement or event idempotency. Checkout rejects non-D1 storage and traffic collection stops and reports unavailable.
-- **Platform compatibility**: the project relies on Wrangler, Workers bindings, D1 and Cron. Tencent EdgeOne, Alibaba Cloud ESA and similar runtimes have not been verified and cannot be assumed to run this project unchanged.
+- **Platform compatibility**: the project relies on Wrangler, Workers bindings, D1 and Cron. Tencent EdgeOne, Alibaba Cloud ESA, Vercel and similar runtimes have not been verified and cannot be assumed to run this project unchanged.
 - **Panel network**: panels must use an HTTPS hostname. Workers cannot fetch bare IPs, private networks or loopback addresses. If a firewall blocks the panel, allow Cloudflare egress or use a Cloudflare Tunnel.
 - **Execution latency**: Cron runs every minute, handles at most 8 nodes per run with concurrency 4, and rotates through larger fleets. Actual timing also depends on panel availability and D1 event backlog.
 - **Payment boundary**: only Waffo is integrated; sandbox is the default. Real merchant webhooks, the full inquiry payload and Waffo retries have not been validated end-to-end. A payment success redirect is not proof of payment; trust the signed server webhook and order state.
 - **Login verification**: repository tests do not include real third-party credentials. Configure a valid Site Key, Secret Key, widget hostname and sending domain, and verify real delivery before going live.
 - **Migrations and rollback**: rolling back the Worker does not undo applied D1 migrations. D1 Time Travel restore overwrites the database in place and is destructive; require approval, stop writes, confirm the timestamp and preserve the current state first.
 - **Secrets**: keep `APP_ENCRYPTION_KEY` permanently. Never expose keys, panel passwords, UUIDs, subscription tokens or payment private keys in logs, issues, screenshots or commits.
+
+</details>
 
 <details>
 <summary><strong>FAQ</strong> (click to expand)</summary>

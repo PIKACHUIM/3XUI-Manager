@@ -17,13 +17,6 @@
   </p>
 
   <p>
-    <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager">
-      <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
-    </a>
-  </p>
-  <p><sub>ワンクリックデプロイは Worker を作成するだけです。D1、データベースマイグレーション、Worker secrets は以下で手動設定してください。</sub></p>
-
-  <p>
     <a href="../README.md">简体中文</a> ·
     <a href="./README_zh-TW.md">繁體中文</a> ·
     <a href="./README_en.md">English</a> ·
@@ -32,8 +25,8 @@
   </p>
 
   <p>
-    <a href="#クイックスタート">クイックスタート</a> ·
-    <a href="#cloudflare-へのデプロイ">デプロイ</a> ·
+    <a href="#クイックデプロイ">クイックデプロイ</a> ·
+    <a href="#手動デプロイ">手動デプロイ</a> ·
     <a href="#システム構成">設定</a> ·
     <a href="#アーキテクチャ">アーキテクチャ</a> ·
     <a href="#注意事項">注意事項</a>
@@ -61,20 +54,40 @@
 | **管理画面** | 12 言語、アラビア語 RTL、ライト / ダーク / システムテーマ、テーマプリセット、レスポンシブ、検索、ページネーション |
 | **セキュリティ** | セッション Cookie、同一オリジン検査、機密フィールドの暗号化、登録 / チェックインの Turnstile、`/api/health` 能力チェック |
 
-### サブスクリプションの生成
+<details>
+<summary><strong>サブスクリプションの生成</strong>（クリックで展開）</summary>
 
 - **Clash / Mihomo**：`选择节点` 手動グループとルールカテゴリグループを生成し、`url-test` の自動切り替えは作りません。各カテゴリから具体的なノードを手動選択できます。
 - **並び順**：大陸ノードを先にし、同カテゴリ内はプラットフォームに保存された順序の昇順です。管理一覧、ユーザーのノード一覧、3 形式のサブスクリプションで同じ並び順データを使います。
 - **認証情報**：ノードへの同期に成功したクライアントだけを出力します。部分的に成功したインバウンドは、確認済みのノードだけを公開します。
 - **キャッシュ**：ETag を返し、再検証時は 304 を返して変更のないプロファイルの再送を避けます。
 
-### 計測とクォータ
+</details>
+
+<details>
+<summary><strong>計測とクォータ</strong>（クリックで展開）</summary>
 
 Cron は毎分、トラフィックサンプリングと権限の突き合わせを実行します。1 回の実行で最大 8 ノード、同時実行 4 です。ノードが多い場合はローテーションします。パネルに到達できない場合や同期に失敗した場合は正常扱いせず、対象クライアントを後続の実行で再試行します。
 
 D1 の使用量イベントは冪等です。クォータ無効化と決済はリースで直列化され、同一アカウントの同時書き込みが互いを上書きしません。
 
-## クイックスタート
+</details>
+
+## クイックデプロイ
+
+| プラットフォーム | ワンクリックデプロイ | 状態 |
+| --- | :---: | --- |
+| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 検証済み |
+| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口あり、ランタイム適配待ち |
+| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 入口あり、ランタイム適配待ち |
+| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口あり、ランタイム適配待ち |
+
+> ワンクリックデプロイはプラットフォームプロジェクトを作成するだけです。D1、マイグレーション、secrets は自動作成されません。Cloudflare Workers が現在の検証済み本番経路です。EdgeOne、ESA、Vercel は Workers bindings、D1、Cron の適配が別途必要で、そのまま実行できるとは見なせません。
+
+## 手動デプロイ
+
+<details>
+<summary><strong>手動デプロイ手順を展開</strong>（ローカル開発、設定、Cloudflare デプロイ）</summary>
 
 ### 前提条件
 
@@ -109,7 +122,8 @@ APP_ENCRYPTION_KEY="<32 文字以上。永続保存が必要>"
 
 </details>
 
-### 初期設定
+<details>
+<summary><strong>初期設定</strong>（クリックで展開）</summary>
 
 1. ローカル開発 URL を開き、ログイン画面の「初回管理者セットアップ」を使います。
 2. `ADMIN_BOOTSTRAP_TOKEN` を入力して管理者を作成します。作成後、この Token はログイン認証情報として使えません。
@@ -118,7 +132,9 @@ APP_ENCRYPTION_KEY="<32 文字以上。永続保存が必要>"
 5. 必要に応じて Turnstile、Resend、Waffo、チェックイン報酬を設定します。
 6. ユーザーを作成するか登録させ、サブスクリプションリンクとクライアント同期を確認します。
 
-## Cloudflare へのデプロイ
+</details>
+
+### Cloudflare へのデプロイ
 
 ### 1. D1 データベースを作成
 
@@ -170,6 +186,8 @@ npm run deploy
 5. Waffo の通知 URL を `https://<your-domain>/api/webhooks/waffo` に設定し、サンドボックスでアップグレード / コールバックを検証します。
 6. Cron ログ、トラフィックサンプリング、サブスクリプション出力、パネルクライアント状態を確認します。
 
+</details>
+
 ## システム構成
 
 ### Worker のバインディングと変数
@@ -184,7 +202,8 @@ npm run deploy
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 初回セットアップ | 最初の管理者作成にのみ使用 |
 | `APP_ENCRYPTION_KEY` | Secret | はい | パネル認証情報と機密設定を暗号化。32 文字以上 |
 
-### システム設定
+<details>
+<summary><strong>システム設定</strong>（クリックで展開）</summary>
 
 | 設定 | 用途 |
 | --- | --- |
@@ -199,6 +218,8 @@ npm run deploy
 | アカウントクリーンアップ | 非アクティブ / プランなしのしきい値と予告日数。既定は無効 |
 
 機密フィールドは `APP_ENCRYPTION_KEY` で暗号化して保存します。管理者が設定を読むと、秘密フィールドは空文字列で返り、`secretConfigured` が設定済みかどうかを示します。書き込み時は省略または空文字列で旧値を保持し、`null` で消去、非空文字列で置換します。
+
+</details>
 
 ### Waffo 決済
 
@@ -307,14 +328,19 @@ wrangler.jsonc   Worker / D1 / KV / Cron 設定
 
 ## 注意事項
 
+<details>
+<summary>クリックして注意事項を展開</summary>
+
 - **ストレージ制限**：本番では D1 が必須です。KV の lease は非アトミックな read-modify-write で、D1 レベルの同時決済やイベント冪等性を提供できません。チェックアウトは非 D1 ストレージを拒否し、トラフィック収集は停止して利用不可を報告します。
-- **プラットフォーム互換性**：Wrangler、Workers bindings、D1、Cron に依存しています。Tencent EdgeOne、Alibaba Cloud ESA などのランタイムは未検証で、そのまま動作するとは見なせません。
+- **プラットフォーム互換性**：Wrangler、Workers bindings、D1、Cron に依存しています。Tencent EdgeOne、Alibaba Cloud ESA、Vercel などのランタイムは未検証で、そのまま動作するとは見なせません。
 - **パネルのネットワーク**：パネルは HTTPS ホスト名必須です。Worker は裸 IP、プライベートネットワーク、ループバックへアクセスできません。ファイアウォールで遮断される場合は Cloudflare の出口を許可するか、Cloudflare Tunnel を使用してください。
 - **実行遅延**：Cron は毎分実行され、1 回最大 8 ノード、同時実行 4 です。ノードが多い場合はローテーションし、実際の時刻はパネルの可用性と D1 イベントの滞留にも左右されます。
 - **決済の境界**：Waffo のみ対応し、既定はサンドボックスです。実際のマーチャント Webhook、完全な Inquiry payload、Waffo の再試行はエンドツーエンド未検証です。決済成功リダイレクトを支払いの証拠にせず、署名検証済みのサーバー Webhook と注文状態を信頼してください。
 - **ログイン検証**：リポジトリのテストに実際の第三者認証情報は含まれません。有効な Site Key、Secret Key、widget ホスト名、送信ドメインを設定し、本番前に実配信を検証してください。
 - **マイグレーションとロールバック**：Worker をロールバックしても適用済み D1 migration は戻りません。D1 Time Travel の復元はデータベースを上書きする破壊的操作です。承認、書き込み停止、時刻確認、現状保存を先に行ってください。
 - **シークレット管理**：`APP_ENCRYPTION_KEY` は永久に保存してください。キー、パネルパスワード、UUID、サブスクリプショントークン、決済秘密鍵をログ、Issue、スクリーンショット、コミットに露出させないでください。
+
+</details>
 
 <details>
 <summary><strong>FAQ</strong>（クリックで展開）</summary>

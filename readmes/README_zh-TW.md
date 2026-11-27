@@ -17,13 +17,6 @@
   </p>
 
   <p>
-    <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager">
-      <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" />
-    </a>
-  </p>
-  <p><sub>一鍵部署只會建立 Worker；D1、資料庫遷移和 Worker secrets 仍需按下方說明手動完成。</sub></p>
-
-  <p>
     <a href="../README.md">简体中文</a> ·
     <strong>繁體中文</strong> ·
     <a href="./README_en.md">English</a> ·
@@ -32,8 +25,8 @@
   </p>
 
   <p>
-    <a href="#快速開始">快速開始</a> ·
-    <a href="#部署到-cloudflare">部署</a> ·
+    <a href="#快速部署">快速部署</a> ·
+    <a href="#手動部署">手動部署</a> ·
     <a href="#系統設定">設定</a> ·
     <a href="#設計架構">架構</a> ·
     <a href="#注意事項">注意事項</a>
@@ -61,20 +54,40 @@
 | **管理體驗** | 12 種介面語言、阿拉伯語 RTL、亮色 / 暗色 / 跟隨系統、主題預設、響應式版面、搜尋與分頁 |
 | **安全防護** | 工作階段 Cookie、同源檢查、敏感欄位加密、Turnstile 註冊 / 簽到驗證、`/api/health` 能力檢查 |
 
-### 訂閱是怎麼生成的
+<details>
+<summary><strong>訂閱是怎麼生成的</strong>（點擊展開）</summary>
 
 - **Clash / Mihomo**：產生 `选择节点` 手動分組與規則分類分組，不產生 `url-test` 自動切換；每個分類仍可直接選擇具體節點。
 - **排序**：大陸節點優先，同類依平台儲存的順序升冪；管理清單、使用者節點清單與三種訂閱格式使用同一套排序資料。
 - **憑證**：訂閱只使用成功同步到節點的用戶端映射；部分成功的入站只輸出已確認的節點。
 - **快取**：回應帶 ETag，用戶端重新驗證時回傳 304，減少重複傳輸。
 
-### 計量與配額
+</details>
+
+<details>
+<summary><strong>計量與配額</strong>（點擊展開）</summary>
 
 Cron 每分鐘執行一次流量取樣與權限對帳。單輪最多處理 8 個節點，併發上限 4；節點更多時輪替取樣。面板無法連線或同步失敗不會被誤判為正常，相關用戶端會在後續輪次重試。
 
 D1 中的用量事件是冪等的，配額停用與支付結算都透過 lease 串行化，避免同一帳戶的併發寫入互相覆蓋。
 
-## 快速開始
+</details>
+
+## 快速部署
+
+| 平台 | 一鍵部署 | 狀態 |
+| --- | :---: | --- |
+| Cloudflare Workers | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/3XUI-Manager) | 已驗證 |
+| EdgeOne Makers | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=3xui-manager&repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口已提供，執行環境待適配 |
+| Aliyun ESA | [![Deploy to Aliyun ESA](https://img.shields.io/badge/Deploy-Aliyun%20ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/edge/function/list) | 入口已提供，執行環境待適配 |
+| Vercel | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/PIKACHUIM/3XUI-Manager) | 入口已提供，執行環境待適配 |
+
+> 一鍵部署只會建立平台專案，不會自動建立 D1、執行遷移或填寫 secrets。Cloudflare Workers 是目前已驗證的生產路徑；EdgeOne、ESA、Vercel 需要自行適配 Workers bindings、D1 與 Cron，不能視為可直接執行。
+
+## 手動部署
+
+<details>
+<summary><strong>展開手動部署步驟</strong>（本地開發、設定與 Cloudflare 部署）</summary>
 
 ### 前置需求
 
@@ -109,7 +122,8 @@ APP_ENCRYPTION_KEY="<至少 32 個字元，需長期保存>"
 
 </details>
 
-### 設定系統
+<details>
+<summary><strong>設定系統</strong>（點擊展開）</summary>
 
 1. 開啟本地開發網址，使用登入頁的「首次管理員初始化」。
 2. 輸入 `ADMIN_BOOTSTRAP_TOKEN` 建立管理員帳號；建立後該 Token 不再代替管理員登入憑證。
@@ -118,7 +132,9 @@ APP_ENCRYPTION_KEY="<至少 32 個字元，需長期保存>"
 5. 視需要設定 Turnstile、Resend、Waffo 與簽到獎勵。
 6. 建立使用者或讓使用者註冊，檢查訂閱連結與用戶端同步狀態。
 
-## 部署到 Cloudflare
+</details>
+
+### 部署到 Cloudflare
 
 ### 1. 建立 D1 資料庫
 
@@ -170,6 +186,8 @@ npm run deploy
 5. 在 Waffo 商戶後台把通知網址設為 `https://<你的網域>/api/webhooks/waffo`，並用沙箱完成一次升級/回呼驗證。
 6. 檢查 Cron 執行日誌、流量取樣、訂閱輸出與節點用戶端狀態。
 
+</details>
+
 ## 系統設定
 
 ### Worker 綁定與變數
@@ -184,7 +202,8 @@ npm run deploy
 | `ADMIN_BOOTSTRAP_TOKEN` | Secret | 首次初始化 | 只用於建立第一個管理員 |
 | `APP_ENCRYPTION_KEY` | Secret | 是 | 加密面板憑證與系統設定敏感欄位，至少 32 字元 |
 
-### 系統設定
+<details>
+<summary><strong>系統設定</strong>（點擊展開）</summary>
 
 | 設定 | 用途 |
 | --- | --- |
@@ -199,6 +218,8 @@ npm run deploy
 | 帳戶清理相關項 | 不活躍/無方案清理門檻與預警天數；預設關閉 |
 
 敏感欄位使用 `APP_ENCRYPTION_KEY` 加密後保存。管理員讀取設定時，秘密欄位回傳空字串，並以 `secretConfigured` 表示是否已設定；寫入時省略或傳空字串保留舊值，傳 `null` 清除，傳非空字串取代。
+
+</details>
 
 ### Waffo 支付
 
@@ -307,14 +328,19 @@ wrangler.jsonc   Worker / D1 / KV / Cron 設定
 
 ## 注意事項
 
+<details>
+<summary>點擊展開查看注意事項</summary>
+
 - **儲存限制**：D1 是生產必需項，KV 的 lease 是非原子讀後寫，不能提供 D1 級併發結算與事件冪等保證。目前支付 checkout 會拒絕非 D1 儲存，流量採集會停止並回報不可用。
-- **平台相容**：專案基於 Wrangler、Workers bindings、D1 與 Cron 建置；Tencent EdgeOne、Alibaba Cloud ESA 等執行環境尚未逐項驗證，不能視為可原樣移植。
+- **平台相容**：專案基於 Wrangler、Workers bindings、D1 與 Cron 建置；Tencent EdgeOne、Alibaba Cloud ESA、Vercel 等執行環境尚未逐項驗證，不能視為可原樣移植。
 - **面板網路**：面板必須使用 HTTPS 網域。Worker 無法存取裸 IP、私有網路或回環位址；面板被防火牆阻擋時，應放行 Cloudflare 出口或使用 Cloudflare Tunnel。
 - **執行延遲**：Cron 每分鐘執行，單輪最多 8 個節點、併發 4；節點更多時輪替取樣，實際執行時間還受面板可用性與 D1 事件積壓影響。
 - **支付邊界**：只接入 Waffo；沙箱為預設環境；真實商戶 Webhook、完整 Inquiry payload 與 Waffo 重試行為未在商戶環境端到端驗證。支付成功跳轉不能當作付款憑證，以簽章驗證後的伺服器 Webhook 與訂單狀態為準。
 - **登入驗證**：倉庫測試不包含真實第三方憑證；上線前必須設定有效 Site Key、Secret Key、widget 網域與寄件網域，並自行完成真實投遞驗證。
 - **遷移回滾**：回滾 Worker 不會撤銷已套用的 D1 migration。D1 Time Travel 還原會原地覆蓋資料庫，屬於破壞性操作，必須審批、停止寫入、確認時間點並先保留目前狀態。
 - **密鑰管理**：`APP_ENCRYPTION_KEY` 必須長期保存；不要在日誌、Issue、截圖或提交記錄中暴露密鑰、面板密碼、UUID、訂閱 Token 或支付私鑰。
+
+</details>
 
 <details>
 <summary><strong>常見問題</strong>（點擊展開）</summary>
