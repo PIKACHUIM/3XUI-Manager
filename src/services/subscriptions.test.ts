@@ -55,6 +55,32 @@ describe("subscription formats", () => {
     expect(vless?.clash["reality-opts"]).toBeUndefined();
     expect(JSON.stringify([vless, vmess, trojan, reality])).not.toMatch(/NEVER-EXPORT|private-panel|admin-secret|admin-password/);
   });
+  it("exports VMess over TCP with HTTP header obfuscation", async () => {
+    const obfuscated = await convertSubscriptionEntry({
+      ...inbound, protocol: "vmess", network: "tcp",
+      config: {
+        settings: { clients: [] },
+        streamSettings: {
+          network: "tcp", security: "none",
+          tcpSettings: { header: { type: "http", request: { path: "/video", headers: { Host: ["firsty.app"], "User-Agent": ["Mozilla/5.0"] } } } },
+        },
+      },
+    }, node, mapping, key);
+    expect(obfuscated?.clash).toMatchObject({
+      type: "vmess", network: "http",
+      "http-opts": { method: "GET", path: ["/video"], headers: { Host: ["firsty.app"], "User-Agent": ["Mozilla/5.0"] } },
+    });
+    const json = JSON.parse(Buffer.from(obfuscated!.uri.slice(8), "base64").toString("utf8"));
+    expect(json).toMatchObject({ net: "tcp", type: "http", host: "firsty.app", path: "/video" });
+    expect(json.tls).toBe("");
+  });
+  it("still rejects TCP header types it cannot translate", async () => {
+    const srtp = await convertSubscriptionEntry({
+      ...inbound, protocol: "vmess",
+      config: { streamSettings: { network: "tcp", security: "none", tcpSettings: { header: { type: "srtp" } } } },
+    }, node, mapping, key);
+    expect(srtp).toBeNull();
+  });
   it("exports Hysteria2 with the per-client auth token and its Salamander obfs password", async () => {
     const hysteria = {
       ...inbound,

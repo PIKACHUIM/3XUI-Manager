@@ -153,7 +153,12 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
   const network = text(stream.network) || inbound.network || "tcp";
   const security = text(stream.security) || "none";
   if (!["tcp", "ws", "grpc"].includes(network) || !["none", "tls", "reality"].includes(security)) return null;
-  if (network === "tcp" && text(object(object(stream.tcpSettings).header).type) && object(object(stream.tcpSettings).header).type !== "none") return null;
+  // TCP carries an optional HTTP header obfuscation layer. `srtp`/`utp` are mKCP transports
+  // and have no equivalent on this path, so anything other than `http` stays unsupported.
+  const tcpHeader = object(object(stream.tcpSettings).header);
+  const tcpHeaderType = (text(tcpHeader.type) || "none").toLowerCase();
+  if (network === "tcp" && tcpHeaderType !== "none" && tcpHeaderType !== "http") return null;
+  if (tcpHeaderType === "http" && protocol !== "vmess" && protocol !== "vless") return null;
   if (security === "reality" && (protocol !== "vless" || network !== "tcp")) return null;
   if (protocol === "trojan" && security !== "tls") return null;
   const clash: Record<string, unknown> = { name, type: protocol === "shadowsocks" ? "ss" : protocol, server, port: inbound.port, udp: true };
@@ -208,6 +213,25 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
     params.set("sni", sni); params.set("pbk", publicKey); params.set("sid", shortId); params.set("fp", fingerprint);
   }
   let path = "", host = "";
+  if (network === "tcp" && tcpHeaderType === "http") {
+    const request = object(tcpHeader.request);
+    path = text(request.path) || "/";
+    const headers = object(request.headers);
+    // Mihomo wants every http-opts header value as a list, which is exactly how the panel
+    // stores them, so only drop entries that carry no usable string.
+    const httpHeaders = Object.fromEntries(Object.entries(headers).map(([name, value]) => [name, strings(value)]).filter(([, value]) => value.length));
+    const hostKey = Object.keys(httpHeaders).find((name) => name.toLowerCase() === "host");
+    host = hostKey ? httpHeaders[hostKey][0] : "";
+    clash.network = "http";
+    clash["http-opts"] = {
+      method: text(request.method) || "GET",
+      path: [path],
+      ...(hostKey ? { headers: httpHeaders } : {}),
+    };
+    params.set("path", path);
+    if (host) params.set("host", host);
+    if (protocol === "vless") params.set("headerType", "http");
+  }
   if (network === "ws") {
     const ws = object(stream.wsSettings);
     path = text(ws.path) || "/"; host = text(object(ws.headers).Host) || text(ws.host);
@@ -236,7 +260,7 @@ export async function convertSubscriptionEntry(inbound: Inbound, node: NodeRecor
     return { clash, uri: `ss://${base64(`${method}:${secret}`)}@${authority}#${encodeURIComponent(name)}`, ss: { id: `${inbound.id}:${node.id}`, remarks: name, server, server_port: inbound.port, method, password: secret } };
   }
   const uri = protocol === "vmess"
-    ? `vmess://${base64(JSON.stringify({ v: "2", ps: name, add: server, port: String(inbound.port), id: secret, aid: "0", scy: "auto", net: network, type: "none", host, path, tls: security === "tls" ? "tls" : "", sni, alpn: alpn.join(",") }))}`
+    ? `vmess://${base64(JSON.stringify({ v: "2", ps: name, add: server, port: String(inbound.port), id: secret, aid: "0", scy: "auto", net: network, type: tcpHeaderType === "http" ? "http" : "none", host, path, tls: security === "tls" ? "tls" : "", sni, alpn: alpn.join(",") }))}`
     : `${protocol}://${encodeURIComponent(secret)}@${authority}?${params}#${encodeURIComponent(name)}`;
   return { clash, uri };
 }
